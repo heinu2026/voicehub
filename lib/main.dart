@@ -8,9 +8,11 @@ import 'services/openclaw_service.dart';
 import 'services/speech_service.dart';
 import 'services/tts_service.dart';
 import 'services/wake_word_service.dart';
+import 'services/settings_service.dart';
 import 'bloc/chat/chat_bloc.dart';
 import 'bloc/chat/chat_event.dart';
 import 'ui/screens/chat_screen.dart';
+import 'ui/screens/settings_screen.dart';
 
 // 判断平台
 import 'package:flutter/foundation.dart';
@@ -27,8 +29,15 @@ void main() async {
   // 请求权限
   await _requestPermissions();
   
+  // 初始化设置服务
+  final settingsService = SettingsService();
+  await settingsService.init();
+  
   // 创建服务
-  final openClawService = OpenClawService();
+  final openClawService = OpenClawService(
+    baseUrl: settingsService.baseUrl,
+    wsUrl: settingsService.wsUrl,
+  );
   final speechService = SpeechService();
   final ttsService = TtsService();
   final wakeWordService = WakeWordService();
@@ -42,6 +51,7 @@ void main() async {
   }
   
   runApp(VoiceHubApp(
+    settingsService: settingsService,
     openClawService: openClawService,
     speechService: speechService,
     ttsService: ttsService,
@@ -72,6 +82,7 @@ Future<void> _requestPermissions() async {
 }
 
 class VoiceHubApp extends StatelessWidget {
+  final SettingsService settingsService;
   final OpenClawService openClawService;
   final SpeechService speechService;
   final TtsService ttsService;
@@ -79,6 +90,7 @@ class VoiceHubApp extends StatelessWidget {
   
   const VoiceHubApp({
     super.key,
+    required this.settingsService,
     required this.openClawService,
     required this.speechService,
     required this.ttsService,
@@ -103,6 +115,11 @@ class VoiceHubApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         theme: AppTheme.darkTheme,
         home: const ChatScreen(),
+        routes: {
+          '/settings': (context) => SettingsScreen(
+            settingsService: settingsService,
+          ),
+        },
       ),
     );
   }

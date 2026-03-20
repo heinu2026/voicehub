@@ -35,9 +35,9 @@ class WakeWordService {
     // 获取 Porcupine 模型路径
     final modelPath = await _getModelPath();
     
-    // 内置唤醒词: "Hey Hub" / "你好助手"
+    // 内置唤醒词: "Hey Claw" / "Ok Claw"
     // 可以从 https://picovoice.ai/porcupine/ 获取自定义唤醒词
-    final keywords = ['hey hub', 'ok hub'];
+    final keywords = ['hey claw', 'ok claw'];
     
     _porcupine = await Porcupine.fromKeywords(
       keywords: keywords,
@@ -203,7 +203,7 @@ class WakeWordException implements Exception {
  * 使用说明:
  * 
  * 1. 唤醒词模型:
- *    - 默认内置 "hey hub", "ok hub"
+ *    - 默认内置 "hey claw", "ok claw"
  *    - 可在 https://picovoice.ai/porcupine/ 创建自定义唤醒词
  *    - 自定义模型放在 assets/porcupine/ 目录
  * 

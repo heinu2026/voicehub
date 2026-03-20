@@ -19,7 +19,7 @@ class ChatScreen extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () {
-              // TODO: 打开设置
+              Navigator.pushNamed(context, '/settings');
             },
           ),
         ],

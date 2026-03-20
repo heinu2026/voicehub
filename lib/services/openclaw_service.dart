@@ -5,8 +5,11 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../config/app_config.dart';
 
 class OpenClawService {
-  late final Dio _dio;
-  late WebSocketChannel? _wsChannel;
+  late Dio _dio;
+  WebSocketChannel? _wsChannel;
+  
+  String _baseUrl;
+  String _wsUrl;
   
   final _responseController = StreamController<String>.broadcast();
   Stream<String> get onResponse => _responseController.stream;
@@ -14,13 +17,27 @@ class OpenClawService {
   bool _isConnected = false;
   bool get isConnected => _isConnected;
   
-  OpenClawService({String? baseUrl}) {
-    final url = baseUrl ?? AppConfig.openClawBaseUrl;
+  OpenClawService({
+    String? baseUrl,
+    String? wsUrl,
+  })  : _baseUrl = baseUrl ?? AppConfig.openClawBaseUrl,
+        _wsUrl = wsUrl ?? AppConfig.openClawWsUrl {
+    _initDio();
+  }
+  
+  void _initDio() {
     _dio = Dio(BaseOptions(
-      baseUrl: url,
+      baseUrl: _baseUrl,
       connectTimeout: const Duration(seconds: 10),
       receiveTimeout: const Duration(seconds: 60),
     ));
+  }
+  
+  /// 更新 URL 配置
+  void updateUrls({String? baseUrl, String? wsUrl}) {
+    if (baseUrl != null) _baseUrl = baseUrl;
+    if (wsUrl != null) _wsUrl = wsUrl;
+    _initDio();
   }
   
   /// 发送消息并获取回复 (HTTP)
@@ -50,7 +67,7 @@ class OpenClawService {
   Future<void> connectWebSocket() async {
     try {
       _wsChannel = WebSocketChannel.connect(
-        Uri.parse(AppConfig.openClawWsUrl),
+        Uri.parse(_wsUrl),
       );
       
       _wsChannel!.stream.listen(
