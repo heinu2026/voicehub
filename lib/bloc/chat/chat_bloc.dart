@@ -5,6 +5,7 @@ import '../../models/message.dart';
 import '../../services/openclaw_service.dart';
 import '../../services/speech_service.dart';
 import '../../services/tts_service.dart';
+import '../../services/wake_word_service.dart';
 import 'chat_event.dart';
 import 'chat_state.dart';
 
@@ -12,9 +13,11 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   final OpenClawService _openClawService;
   final SpeechService _speechService;
   final TtsService _ttsService;
+  final WakeWordService _wakeWordService;
   
   StreamSubscription? _speechSubscription;
   StreamSubscription? _speechStatusSubscription;
+  StreamSubscription? _wakeWordSubscription;
   
   final _uuid = const Uuid();
   
@@ -22,9 +25,11 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     required OpenClawService openClawService,
     required SpeechService speechService,
     required TtsService ttsService,
+    required WakeWordService wakeWordService,
   })  : _openClawService = openClawService,
         _speechService = speechService,
         _ttsService = ttsService,
+        _wakeWordService = wakeWordService,
         super(const ChatState()) {
     
     // 初始化服务
@@ -57,6 +62,12 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       if (!isListening && state.status == ChatStatus.listening) {
         add(StopVoiceInput());
       }
+    });
+    
+    // 监听唤醒词事件
+    _wakeWordSubscription = _wakeWordService.onWakeWord.listen((_) {
+      // 检测到唤醒词，开始语音输入
+      add(StartVoiceInput());
     });
   }
   
@@ -161,9 +172,11 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   Future<void> close() {
     _speechSubscription?.cancel();
     _speechStatusSubscription?.cancel();
+    _wakeWordSubscription?.cancel();
     _openClawService.dispose();
     _speechService.dispose();
     _ttsService.dispose();
+    _wakeWordService.dispose();
     return super.close();
   }
 }

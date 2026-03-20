@@ -7,9 +7,13 @@ import 'core/theme/app_theme.dart';
 import 'services/openclaw_service.dart';
 import 'services/speech_service.dart';
 import 'services/tts_service.dart';
+import 'services/wake_word_service.dart';
 import 'bloc/chat/chat_bloc.dart';
 import 'bloc/chat/chat_event.dart';
 import 'ui/screens/chat_screen.dart';
+
+// 判断平台
+import 'package:flutter/foundation.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,11 +31,21 @@ void main() async {
   final openClawService = OpenClawService();
   final speechService = SpeechService();
   final ttsService = TtsService();
+  final wakeWordService = WakeWordService();
+  
+  // 初始化唤醒词服务
+  try {
+    await wakeWordService.init();
+    debugPrint('唤醒词服务初始化成功');
+  } catch (e) {
+    debugPrint('唤醒词服务初始化失败: $e');
+  }
   
   runApp(VoiceHubApp(
     openClawService: openClawService,
     speechService: speechService,
     ttsService: ttsService,
+    wakeWordService: wakeWordService,
   ));
 }
 
@@ -47,18 +61,28 @@ Future<void> _requestPermissions() async {
   if (speechStatus.isDenied) {
     debugPrint('语音识别权限被拒绝');
   }
+  
+  // Android: 请求后台权限 (Android 13+)
+  if (defaultTargetPlatform == TargetPlatform.android) {
+    final notificationStatus = await Permission.notification.request();
+    if (notificationStatus.isDenied) {
+      debugPrint('通知权限被拒绝');
+    }
+  }
 }
 
 class VoiceHubApp extends StatelessWidget {
   final OpenClawService openClawService;
   final SpeechService speechService;
   final TtsService ttsService;
+  final WakeWordService wakeWordService;
   
   const VoiceHubApp({
     super.key,
     required this.openClawService,
     required this.speechService,
     required this.ttsService,
+    required this.wakeWordService,
   });
   
   @override
@@ -70,6 +94,7 @@ class VoiceHubApp extends StatelessWidget {
             openClawService: openClawService,
             speechService: speechService,
             ttsService: ttsService,
+            wakeWordService: wakeWordService,
           )..add(_Initialize()),
         ),
       ],
