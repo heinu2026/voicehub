@@ -5,6 +5,10 @@ class AppConfig {
   static const String openClawBaseUrl = 'http://192.168.1.x:8000';
   static const String openClawWsUrl = 'ws://192.168.1.x:8000';
   
+  // OpenClaw Agent 配置
+  static const String defaultAgentId = 'main';  // 默认 Agent
+  static const String defaultModel = '';         // 空则使用默认模型
+  
   // 唤醒词
   static const String wakeWord = 'Hey OpenClaw';
   

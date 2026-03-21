@@ -37,6 +37,8 @@ void main() async {
   final openClawService = OpenClawService(
     baseUrl: settingsService.baseUrl,
     wsUrl: settingsService.wsUrl,
+    agentId: settingsService.agentId,
+    model: settingsService.model,
   );
   final speechService = SpeechService();
   final ttsService = TtsService();
