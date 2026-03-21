@@ -29,7 +29,10 @@ class OpenClawService {
     _dio = Dio(BaseOptions(
       baseUrl: _baseUrl,
       connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 60),
+      receiveTimeout: const Duration(seconds: 120),  // AI 生成可能较慢
+      headers: {
+        'Content-Type': 'application/json',
+      },
     ));
   }
   
@@ -40,26 +43,131 @@ class OpenClawService {
     _initDio();
   }
   
-  /// 发送消息并获取回复 (HTTP)
+  /// 发送消息并获取回复 (HTTP API)
   Future<String> sendMessage(String text) async {
     try {
+      // OpenClaw OpenResponses API 格式
       final response = await _dio.post(
         '/api/message',
         data: {
           'message': text,
           'channel': AppConfig.channelName,
         },
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        ),
       );
       
       final data = response.data;
       
-      // 处理不同响应格式
+      // 解析响应 - 支持多种格式
+      String reply = '';
+      
       if (data is Map) {
-        return data['reply'] ?? data['message'] ?? data['content'] ?? data.toString();
+        // 标准格式: { reply: "..." }
+        // 或: { message: { content: "..." } }
+        // 或: { choices: [{ message: { content: "..." } }] }
+        if (data.containsKey('reply')) {
+          reply = data['reply'] ?? '';
+        } else if (data.containsKey('message')) {
+          final msg = data['message'];
+          reply = msg is Map ? msg['content'] ?? msg.toString() : msg.toString();
+        } else if (data.containsKey('content')) {
+          reply = data['content'] ?? '';
+        } else if (data.containsKey('choices')) {
+          final choices = data['choices'] as List?;
+          if (choices != null && choices.isNotEmpty) {
+            final firstChoice = choices.first;
+            if (firstChoice is Map) {
+              final msg = firstChoice['message'] ?? firstChoice;
+              reply = msg['content'] ?? msg.toString();
+            } else {
+              reply = firstChoice.toString();
+            }
+          }
+        } else {
+          reply = data.toString();
+        }
+      } else if (data is String) {
+        reply = data;
+      } else {
+        reply = data.toString();
       }
-      return data.toString();
+      
+      return reply;
+      
     } on DioException catch (e) {
+      if (e.response != null) {
+        final errorData = e.response!.data;
+        final errorMsg = errorData is Map 
+            ? errorData['error'] ?? errorData['message'] ?? errorData.toString()
+            : errorData?.toString() ?? '未知错误';
+        throw OpenClawException('API 错误: $errorMsg');
+      }
+      
+      if (e.type == DioExceptionType.connectionTimeout) {
+        throw OpenClawException('连接超时，请检查网络');
+      }
+      if (e.type == DioExceptionType.receiveTimeout) {
+        throw OpenClawException('响应超时，AI 可能正在思考');
+      }
       throw OpenClawException('请求失败: ${e.message}');
+    } catch (e) {
+      throw OpenClawException('解析响应失败: $e');
+    }
+  }
+  
+  /// 流式响应 (如果 API 支持)
+  Stream<String> sendMessageStream(String text) async* {
+    try {
+      final response = await _dio.post(
+        '/api/message/stream',
+        data: {
+          'message': text,
+          'channel': AppConfig.channelName,
+          'stream': true,
+        },
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          responseType: ResponseType.stream,
+        ),
+      );
+      
+      final stream = response.data as Stream<List<int>>;
+      
+      await for (final chunk in stream) {
+        final str = utf8.decode(chunk);
+        final lines = str.split('\n');
+        
+        for (final line in lines) {
+          if (line.startsWith('data: ')) {
+            final data = line.substring(6);
+            if (data == '[DONE]') return;
+            
+            try {
+              final json = jsonDecode(data);
+              final content = json['choices']?[0]?['delta']?['content'] 
+                  ?? json['content'] 
+                  ?? json['delta']?['content']
+                  ?? '';
+              if (content.isNotEmpty) {
+                yield content;
+              }
+            } catch (_) {
+              // 非 JSON 格式，直接输出
+              if (data.isNotEmpty && data != '[DONE]') {
+                yield data;
+              }
+            }
+          }
+        }
+      }
+    } on DioException catch (e) {
+      throw OpenClawException('流式请求失败: ${e.message}');
     }
   }
   
@@ -96,7 +204,7 @@ class OpenClawService {
   }
   
   /// 通过 WebSocket 发送消息
-  void sendMessageStream(String text) {
+  void sendMessageStreamWs(String text) {
     if (_wsChannel == null || !_isConnected) {
       throw OpenClawException('WebSocket 未连接');
     }
