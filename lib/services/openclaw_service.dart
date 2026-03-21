@@ -56,15 +56,12 @@ class OpenClawService {
     _initDio();
   }
   
-  /// 获取请求参数
-  Map<String, dynamic> _buildParams([String? message]) {
+  /// 构建请求参数
+  Map<String, dynamic> _buildParams(String message) {
     final params = <String, dynamic>{
+      'message': message,
       'channel': AppConfig.channelName,
     };
-    
-    if (message != null) {
-      params['message'] = message;
-    }
     
     // 添加 agentId (非默认才传)
     if (_agentId.isNotEmpty && _agentId != AppConfig.defaultAgentId) {
@@ -79,7 +76,7 @@ class OpenClawService {
     return params;
   }
   
-  /// 发送消息并获取回复 (HTTP API)
+  /// 发送消息并获取回复
   Future<String> sendMessage(String text) async {
     try {
       final response = await _dio.post(
@@ -87,10 +84,7 @@ class OpenClawService {
         data: _buildParams(text),
       );
       
-      final data = response.data;
-      
-      // 解析响应 - 支持多种格式
-      return _parseReply(data);
+      return _parseReply(response.data);
       
     } on DioException catch (e) {
       throw OpenClawException(_handleDioError(e));
@@ -101,37 +95,29 @@ class OpenClawService {
   
   /// 解析回复内容
   String _parseReply(dynamic data) {
-    String reply = '';
-    
     if (data is Map) {
-      if (data.containsKey('reply')) {
-        reply = data['reply'] ?? '';
-      } else if (data.containsKey('message')) {
+      if (data.containsKey('reply')) return data['reply'] ?? '';
+      if (data.containsKey('message')) {
         final msg = data['message'];
-        reply = msg is Map ? msg['content'] ?? msg.toString() : msg.toString();
-      } else if (data.containsKey('content')) {
-        reply = data['content'] ?? '';
-      } else if (data.containsKey('choices')) {
+        return msg is Map ? msg['content'] ?? msg.toString() : msg.toString();
+      }
+      if (data.containsKey('content')) return data['content'] ?? '';
+      if (data.containsKey('choices')) {
         final choices = data['choices'] as List?;
         if (choices != null && choices.isNotEmpty) {
           final firstChoice = choices.first;
           if (firstChoice is Map) {
             final msg = firstChoice['message'] ?? firstChoice;
-            reply = msg['content'] ?? msg.toString();
-          } else {
-            reply = firstChoice.toString();
+            return msg['content'] ?? msg.toString();
           }
+          return firstChoice.toString();
         }
-      } else {
-        reply = data.toString();
       }
+      return data.toString();
     } else if (data is String) {
-      reply = data;
-    } else {
-      reply = data.toString();
+      return data;
     }
-    
-    return reply;
+    return data.toString();
   }
   
   /// 处理 Dio 错误
@@ -144,61 +130,19 @@ class OpenClawService {
       return 'API 错误: $errorMsg';
     }
     
-    if (e.type == DioExceptionType.connectionTimeout) {
-      return '连接超时，请检查网络';
-    }
-    if (e.type == DioExceptionType.receiveTimeout) {
-      return '响应超时，AI 可能正在思考';
-    }
-    if (e.type == DioExceptionType.connectionError) {
-      return '无法连接服务器，请检查地址';
-    }
-    return '请求失败: ${e.message}';
-  }
-  
-  /// 流式响应 (如果 API 支持)
-  Stream<String> sendMessageStream(String text) async* {
-    try {
-      final response = await _dio.post(
-        '/api/message/stream',
-        data: _buildParams(text),
-        options: Options(responseType: ResponseType.stream),
-      );
-      
-      final stream = response.data as Stream<List<int>>;
-      
-      await for (final chunk in stream) {
-        final str = utf8.decode(chunk);
-        final lines = str.split('\n');
-        
-        for (final line in lines) {
-          if (line.startsWith('data: ')) {
-            final data = line.substring(6);
-            if (data == '[DONE]') return;
-            
-            try {
-              final json = jsonDecode(data);
-              final content = json['choices']?[0]?['delta']?['content'] 
-                  ?? json['content'] 
-                  ?? json['delta']?['content']
-                  ?? '';
-              if (content.isNotEmpty) {
-                yield content;
-              }
-            } catch (_) {
-              if (data.isNotEmpty && data != '[DONE]') {
-                yield data;
-              }
-            }
-          }
-        }
-      }
-    } on DioException catch (e) {
-      throw OpenClawException('流式请求失败: ${_handleDioError(e)}');
+    switch (e.type) {
+      case DioExceptionType.connectionTimeout:
+        return '连接超时，请检查网络';
+      case DioExceptionType.receiveTimeout:
+        return '响应超时，AI 可能正在思考';
+      case DioExceptionType.connectionError:
+        return '无法连接服务器，请检查地址';
+      default:
+        return '请求失败: ${e.message}';
     }
   }
   
-  /// 连接 WebSocket (实时对话)
+  /// 连接 WebSocket
   Future<void> connectWebSocket() async {
     try {
       _wsChannel = WebSocketChannel.connect(Uri.parse(_wsUrl));
@@ -229,7 +173,6 @@ class OpenClawService {
     if (_wsChannel == null || !_isConnected) {
       throw OpenClawException('WebSocket 未连接');
     }
-    
     _wsChannel!.sink.add(jsonEncode(_buildParams(text)));
   }
   
