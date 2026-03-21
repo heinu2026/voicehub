@@ -4,8 +4,12 @@ import '../../bloc/chat/chat_bloc.dart';
 import '../../bloc/chat/chat_event.dart';
 import '../../bloc/chat/chat_state.dart';
 import '../../core/theme/app_theme.dart';
+import '../../services/settings_service.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/voice_button.dart';
+
+// 全局 settings service (从 main.dart 传递)
+SettingsService? globalSettingsService;
 
 class ChatScreen extends StatelessWidget {
   const ChatScreen({super.key});
@@ -16,6 +20,15 @@ class ChatScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('VoiceHub'),
         actions: [
+          // 新会话按钮
+          IconButton(
+            icon: const Icon(Icons.add_comment),
+            tooltip: '新会话',
+            onPressed: () {
+              _showNewSessionDialog(context);
+            },
+          ),
+          // 设置按钮
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () {
@@ -214,6 +227,42 @@ class ChatScreen extends StatelessWidget {
                 fontSize: 14,
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  void _showNewSessionDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('新会话'),
+        content: const Text(
+          '开启新会话将：\n'
+          '• 清空当前对话记录\n'
+          '• 开始全新的对话\n'
+          '• 保留所有设置',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              // 生成新的 userId
+              final newUserId = await globalSettingsService?.newSession() ?? '';
+              
+              if (context.mounted) {
+                context.read<ChatBloc>().add(NewSession(newUserId));
+                Navigator.pop(dialogContext);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('已开启新会话')),
+                );
+              }
+            },
+            child: const Text('开启新会话'),
           ),
         ],
       ),

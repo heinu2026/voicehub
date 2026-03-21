@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -12,6 +11,7 @@ class OpenClawService {
   String _wsUrl;
   String _agentId;
   String _model;
+  String _userId;
   
   final _responseController = StreamController<String>.broadcast();
   Stream<String> get onResponse => _responseController.stream;
@@ -24,10 +24,12 @@ class OpenClawService {
     String? wsUrl,
     String? agentId,
     String? model,
+    String? userId,
   })  : _baseUrl = baseUrl ?? AppConfig.openClawBaseUrl,
         _wsUrl = wsUrl ?? AppConfig.openClawWsUrl,
         _agentId = agentId ?? AppConfig.defaultAgentId,
-        _model = model ?? AppConfig.defaultModel {
+        _model = model ?? AppConfig.defaultModel,
+        _userId = userId ?? '' {
     _initDio();
   }
   
@@ -36,9 +38,7 @@ class OpenClawService {
       baseUrl: _baseUrl,
       connectTimeout: const Duration(seconds: 10),
       receiveTimeout: const Duration(seconds: 120),
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: {'Content-Type': 'application/json'},
     ));
   }
   
@@ -48,12 +48,19 @@ class OpenClawService {
     String? wsUrl,
     String? agentId,
     String? model,
+    String? userId,
   }) {
     if (baseUrl != null) _baseUrl = baseUrl;
     if (wsUrl != null) _wsUrl = wsUrl;
     if (agentId != null) _agentId = agentId;
     if (model != null) _model = model;
+    if (userId != null) _userId = userId;
     _initDio();
+  }
+  
+  /// 更新 User ID (切换 session)
+  void setUserId(String userId) {
+    _userId = userId;
   }
   
   /// 构建请求参数
@@ -61,14 +68,13 @@ class OpenClawService {
     final params = <String, dynamic>{
       'message': message,
       'channel': AppConfig.channelName,
+      'user': _userId,  // Session 标识
     };
     
-    // 添加 agentId (非默认才传)
     if (_agentId.isNotEmpty && _agentId != AppConfig.defaultAgentId) {
       params['agentId'] = _agentId;
     }
     
-    // 添加 model (非空才传)
     if (_model.isNotEmpty) {
       params['model'] = _model;
     }

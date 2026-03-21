@@ -44,3 +44,13 @@ class ClearMessages extends ChatEvent {}
 
 /// 停止 TTS 播放
 class StopTts extends ChatEvent {}
+
+/// 新会话 (切换 session)
+class NewSession extends ChatEvent {
+  final String newUserId;
+  
+  const NewSession(this.newUserId);
+  
+  @override
+  List<Object?> get props => [newUserId];
+}

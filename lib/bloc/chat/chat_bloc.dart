@@ -50,6 +50,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     // 清除消息
     on<ClearMessages>(_onClearMessages);
     
+    // 新会话
+    on<NewSession>(_onNewSession);
+    
     // 监听语音识别结果
     _speechSubscription = _speechService.onResult.listen((text) {
       if (text.isNotEmpty) {
@@ -162,6 +165,17 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   }
   
   Future<void> _onClearMessages(ClearMessages event, Emitter<ChatState> emit) async {
+    emit(state.copyWith(
+      messages: [],
+      status: ChatStatus.idle,
+    ));
+  }
+  
+  Future<void> _onNewSession(NewSession event, Emitter<ChatState> emit) async {
+    // 更新 OpenClawService 的 userId
+    _openClawService.setUserId(event.newUserId);
+    
+    // 清空对话记录
     emit(state.copyWith(
       messages: [],
       status: ChatStatus.idle,

@@ -39,6 +39,7 @@ void main() async {
     wsUrl: settingsService.wsUrl,
     agentId: settingsService.agentId,
     model: settingsService.model,
+    userId: settingsService.userId,
   );
   final speechService = SpeechService();
   final ttsService = TtsService();
@@ -51,6 +52,9 @@ void main() async {
   } catch (e) {
     debugPrint('唤醒词服务初始化失败: $e');
   }
+  
+  // 设置全局 settings service (用于新会话)
+  globalSettingsService = settingsService;
   
   runApp(VoiceHubApp(
     settingsService: settingsService,
