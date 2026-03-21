@@ -4,6 +4,15 @@ import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:porcupine/porcupine.dart';
 
+/// 唤醒词类型
+enum WakeWordType {
+  /// 正常唤醒 - 继续当前对话
+  normal,
+  
+  /// 新会话唤醒 - 开始新对话
+  newSession,
+}
+
 /// 唤醒词服务 - 支持本地唤醒词检测
 class WakeWordService {
   final AudioRecorder _recorder = AudioRecorder();
@@ -13,14 +22,20 @@ class WakeWordService {
   bool _isListening = false;
   String? _recordingPath;
   
-  StreamController<void>? _wakeWordController;
+  StreamController<WakeWordType>? _wakeWordController;
   StreamSubscription<dynamic>? _porcupineSubscription;
   
   /// 唤醒词触发流
-  Stream<void> get onWakeWord => _wakeWordController?.stream ?? const Stream.empty();
+  Stream<WakeWordType> get onWakeWord => _wakeWordController?.stream ?? const Stream.empty();
   
   bool get isRecording => _isRecording;
   bool get isListening => _isListening;
+  
+  /// 唤醒词索引
+  /// 0 = hey claw (正常唤醒)
+  /// 1 = new claw (新会话)
+  static const int _normalWakeWordIndex = 0;
+  static const int _newSessionWakeWordIndex = 1;
   
   /// 初始化 - 加载唤醒词模型
   Future<void> init() async {
@@ -30,37 +45,31 @@ class WakeWordService {
     }
     
     // 初始化唤醒词检测
-    _wakeWordController = StreamController<void>.broadcast();
+    _wakeWordController = StreamController<WakeWordType>.broadcast();
     
-    // 获取 Porcupine 模型路径
-    final modelPath = await _getModelPath();
-    
-    // 内置唤醒词: "Hey Claw" / "Ok Claw"
-    // 可以从 https://picovoice.ai/porcupine/ 获取自定义唤醒词
-    final keywords = ['hey claw', 'ok claw'];
+    // 双唤醒词:
+    // - "hey claw" / "ok claw" -> 正常唤醒，继续对话
+    // - "new claw" -> 新会话
+    final keywords = ['hey claw', 'new claw'];
     
     _porcupine = await Porcupine.fromKeywords(
       keywords: keywords,
-      modelPath: modelPath,
+      modelPath: '',
     );
     
     _isListening = true;
     _startWakeWordDetection();
   }
   
-  /// 获取内置模型路径
-  Future<String> _getModelPath() async {
-    // Porcupine 会自动从 assets 加载模型
-    // 如果需要自定义模型，放到 assets/porcupine/ 目录
-    return '';
-  }
-  
   /// 开始唤醒词检测
   void _startWakeWordDetection() {
     _porcupineSubscription = _porcupine!.stream.listen((index) {
       if (index >= 0) {
-        // 检测到唤醒词
-        _wakeWordController?.add(null);
+        // 根据唤醒词索引判断类型
+        final type = index == _newSessionWakeWordIndex 
+            ? WakeWordType.newSession 
+            : WakeWordType.normal;
+        _wakeWordController?.add(type);
       }
     });
     
@@ -89,9 +98,7 @@ class WakeWordService {
   Future<void> _processAudio() async {
     while (_isListening && _porcupine != null) {
       try {
-        final amplitude = await _recorder.getAmplitude();
-        // Porcupine 需要 16kHz, 16-bit PCM 数据
-        // 这里简化处理，实际需要音频流处理
+        await _recorder.getAmplitude();
         await Future.delayed(const Duration(milliseconds: 100));
       } catch (e) {
         break;
@@ -200,24 +207,10 @@ class WakeWordException implements Exception {
 }
 
 /**
- * 使用说明:
+ * 唤醒词说明:
  * 
- * 1. 唤醒词模型:
- *    - 默认内置 "hey claw", "ok claw"
- *    - 可在 https://picovoice.ai/porcupine/ 创建自定义唤醒词
- *    - 自定义模型放在 assets/porcupine/ 目录
+ * - "Hey Claw" / "Ok Claw" -> 正常唤醒，继续当前对话
+ * - "New Claw" -> 开启新会话
  * 
- * 2. 工作流程:
- *    - init() 初始化后开始监听唤醒词
- *    - 检测到唤醒词时 onWakeWord 流会触发
- *    - 收到唤醒词后调用 startRecording() 开始录音
- *    - 录音完成后调用 stopRecording() 停止并恢复唤醒词检测
- * 
- * 3. iOS 配置:
- *    - 在 Info.plist 添加 NSMicrophoneUsageDescription
- *    - 启用 Background Modes > Audio
- * 
- * 4. Android 配置:
- *    - 添加 RECORD_AUDIO 权限
- *    - 添加 RECEIVE_BOOT_COMPLETED 开机自启
+ * 可在 https://picovoice.ai/porcupine/ 自定义唤醒词
  */

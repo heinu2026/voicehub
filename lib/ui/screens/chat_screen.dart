@@ -4,12 +4,8 @@ import '../../bloc/chat/chat_bloc.dart';
 import '../../bloc/chat/chat_event.dart';
 import '../../bloc/chat/chat_state.dart';
 import '../../core/theme/app_theme.dart';
-import '../../services/settings_service.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/voice_button.dart';
-
-// 全局 settings service (从 main.dart 传递)
-SettingsService? globalSettingsService;
 
 class ChatScreen extends StatelessWidget {
   const ChatScreen({super.key});

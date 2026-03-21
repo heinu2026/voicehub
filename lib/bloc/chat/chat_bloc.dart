@@ -4,10 +4,14 @@ import 'package:uuid/uuid.dart';
 import '../../models/message.dart';
 import '../../services/openclaw_service.dart';
 import '../../services/speech_service.dart';
+import '../../services/settings_service.dart';
 import '../../services/tts_service.dart';
 import '../../services/wake_word_service.dart';
 import 'chat_event.dart';
 import 'chat_state.dart';
+
+/// 全局 settings service (在新会话时获取新 userId)
+SettingsService? globalSettingsService;
 
 class ChatBloc extends Bloc<ChatEvent, ChatState> {
   final OpenClawService _openClawService;
@@ -68,9 +72,14 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     });
     
     // 监听唤醒词事件
-    _wakeWordSubscription = _wakeWordService.onWakeWord.listen((_) {
-      // 检测到唤醒词，开始语音输入
-      add(StartVoiceInput());
+    _wakeWordSubscription = _wakeWordService.onWakeWord.listen((type) {
+      if (type == WakeWordType.newSession) {
+        // 新会话唤醒词 - 开启新会话
+        add(NewSession(globalSettingsService?.newSession() ?? ''));
+      } else {
+        // 正常唤醒词 - 开始语音输入
+        add(StartVoiceInput());
+      }
     });
   }
   
