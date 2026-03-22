@@ -115,6 +115,17 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   /// 从设置页返回后，直接开始聆听
   void _onStartListening(StartListening event, Emitter<ChatState> emit) {
     debugPrint('ChatBloc: StartListening 触发，当前状态=${state.status}，whisperUrl=${_settingsService.whisperUrl}');
+
+    // Whisper STT 必须可用
+    if (!_settingsService.isWhisperConfigured) {
+      debugPrint('ChatBloc: Whisper 未配置');
+      emit(state.copyWith(
+        status: ChatStatus.configRequired,
+        errorMessage: '请先配置 Whisper STT 服务器地址',
+      ));
+      return;
+    }
+
     // 先停止当前录音（防止重复）
     _speechService.stop();
     // 重新开始聆听
