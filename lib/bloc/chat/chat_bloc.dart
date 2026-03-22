@@ -208,6 +208,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   Future<void> _onConversationListeningResult(
       ConversationListeningResult event, Emitter<ChatState> emit) async {
     final text = event.recognizedText;
+    debugPrint('ChatBloc: 收到识别结果 "$text"');
 
     if (_containsExitKeyword(text)) {
       try {

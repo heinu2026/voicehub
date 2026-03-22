@@ -20,8 +20,8 @@ class SpeechService {
   final FlutterSoundRecorder _recorder = FlutterSoundRecorder();
 
   // 录音状态机
-  static const double _speechThreshold = 25.0; // 高于此值=说话中
-  static const double _silenceThreshold = 10.0; // 低于此值=安静
+  static const double _speechThreshold = 15.0; // 高于此值=说话中
+  static const double _silenceThreshold = 0.0; // 低于此值=安静
   static const int _recordDurationAfterSpeech = 5; // 检测到说话后继续录多少秒
   static const int _maxRecordDuration = 60; // 最长录音秒数
 
@@ -134,12 +134,14 @@ class SpeechService {
         _triggerRecognition();
       }
     } else {
-      // 中间地带，重置静音计数但不离谱
-      _silenceSeconds = 0;
+      // 中间地带（5~15dB）：不清零静音累积，只取消计时器
+      // 这样短暂的环境噪音不会打断静音累积
+      _silenceTimer?.cancel();
     }
   }
 
   Future<void> _triggerRecognition() async {
+    debugPrint('SpeechService: _triggerRecognition() 开始');
     _recorderSubscription?.cancel();
     _silenceTimer?.cancel();
     _maxRecordTimer?.cancel();
@@ -147,6 +149,7 @@ class SpeechService {
     _statusController.add(false);
 
     await _recorder.stopRecorder();
+    debugPrint('SpeechService: 录音已停止，准备识别');
 
     // 没有检测到说话则跳过识别，静默等待用户手动触发
     if (!_isSpeechDetected) {
@@ -172,7 +175,9 @@ class SpeechService {
 
       if (await file.exists() && size > 100) {
         try {
+          debugPrint('SpeechService: 开始 Whisper 识别，文件大小 $size');
           final text = await _whisperSttService!.transcribe(_tempPath!);
+          debugPrint('SpeechService: Whisper 返回 "$text"');
           if (text.isNotEmpty) {
             debugPrint('SpeechService: 识别结果 "$text"');
             _resultController.add(text);
