@@ -5,257 +5,251 @@ import '../../bloc/chat/chat_event.dart';
 import '../../bloc/chat/chat_state.dart';
 import '../../core/theme/app_theme.dart';
 import '../widgets/message_bubble.dart';
-import '../widgets/voice_button.dart';
 
 class ChatScreen extends StatelessWidget {
   const ChatScreen({super.key});
-  
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('VoiceHub'),
+        title: const Text('VoiceClaw'),
         actions: [
-          // 新会话按钮
           IconButton(
             icon: const Icon(Icons.add_comment),
             tooltip: '新会话',
-            onPressed: () {
-              _showNewSessionDialog(context);
-            },
+            onPressed: () => _showNewSessionDialog(context),
           ),
-          // 设置按钮
           IconButton(
             icon: const Icon(Icons.settings),
-            onPressed: () {
-              Navigator.pushNamed(context, '/settings');
-            },
+            onPressed: () => Navigator.pushNamed(context, '/settings'),
           ),
         ],
       ),
       body: Column(
         children: [
+          // 状态栏
+          BlocBuilder<ChatBloc, ChatState>(
+            builder: (context, state) => _buildStatusBar(state),
+          ),
+
           // 对话列表
           Expanded(
             child: BlocBuilder<ChatBloc, ChatState>(
               builder: (context, state) {
                 if (state.messages.isEmpty) {
-                  return _buildEmptyState();
+                  return _buildEmptyState(context, state);
                 }
-                
-                return ListView.builder(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  reverse: false,
-                  itemCount: state.messages.length,
-                  itemBuilder: (context, index) {
-                    final message = state.messages[index];
-                    return MessageBubble(message: message);
-                  },
+
+                return Column(
+                  children: [
+                    Expanded(
+                      child: ListView.builder(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        itemCount: state.messages.length,
+                        itemBuilder: (context, index) {
+                          final message = state.messages[index];
+                          return MessageBubble(message: message);
+                        },
+                      ),
+                    ),
+                    // 空闲时显示"开始说话"按钮
+                    if (state.status == ChatStatus.idle)
+                      Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              context.read<ChatBloc>().add(StartListening());
+                            },
+                            icon: const Icon(Icons.mic),
+                            label: const Text('开始说话'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.primaryColor,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 );
               },
             ),
           ),
-          
-          // 状态指示
-          BlocBuilder<ChatBloc, ChatState>(
-            builder: (context, state) {
-              return _buildStatusBar(state);
-            },
-          ),
-          
-          // 底部控制栏
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceColor,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
-                  blurRadius: 10,
-                  offset: const Offset(0, -2),
-                ),
-              ],
-            ),
-            child: SafeArea(
-              child: Column(
-                children: [
-                  // 文字输入框
-                  BlocBuilder<ChatBloc, ChatState>(
-                    builder: (context, state) {
-                      return TextField(
-                        decoration: InputDecoration(
-                          hintText: '输入消息...',
-                          suffixIcon: IconButton(
-                            icon: const Icon(Icons.send),
-                            onPressed: () {
-                              // TODO: 发送文字
-                            },
-                          ),
-                        ),
-                        onSubmitted: (text) {
-                          if (text.trim().isNotEmpty) {
-                            context.read<ChatBloc>().add(SendTextMessage(text));
-                          }
-                        },
-                      );
-                    },
-                  ),
-                  
-                  const SizedBox(height: 20),
-                  
-                  // 语音按钮
-                  BlocBuilder<ChatBloc, ChatState>(
-                    builder: (context, state) {
-                      return Column(
-                        children: [
-                          VoiceButton(
-                            isListening: state.status == ChatStatus.listening,
-                            voiceLevel: state.voiceLevel,
-                            onPressed: () {
-                              if (state.status == ChatStatus.listening) {
-                                context.read<ChatBloc>().add(StopVoiceInput());
-                              } else {
-                                context.read<ChatBloc>().add(StartVoiceInput());
-                              }
-                            },
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            state.status == ChatStatus.listening
-                                ? '正在聆听...'
-                                : '按住说话',
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.7),
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      );
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ),
         ],
       ),
     );
   }
-  
-  Widget _buildEmptyState() {
+
+  Widget _buildEmptyState(BuildContext context, ChatState state) {
+    // 配置不完整时显示引导页
+    if (state.status == ChatStatus.configRequired) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.settings_input_antenna, size: 80, color: AppTheme.primaryColor.withOpacity(0.5)),
+              const SizedBox(height: 24),
+              Text(
+                '请先完成配置',
+                style: TextStyle(fontSize: 22, color: Colors.white.withOpacity(0.9)),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                state.errorMessage ?? '配置不完整',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 14, color: Colors.white.withOpacity(0.6)),
+              ),
+              const SizedBox(height: 32),
+              ElevatedButton.icon(
+                onPressed: () async {
+                  // 跳转到设置页
+                  await Navigator.pushNamed(context, '/settings');
+                  // 返回后直接开始聆听
+                  if (context.mounted) {
+                    context.read<ChatBloc>().add(StartListening());
+                  }
+                },
+                icon: const Icon(Icons.settings),
+                label: const Text('去设置'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primaryColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    String hint;
+    IconData icon;
+
+    switch (state.status) {
+      case ChatStatus.listening:
+        hint = '正在聆听...\n说完话等 3 秒自动识别';
+        icon = Icons.mic;
+        break;
+      case ChatStatus.processing:
+        hint = '思考中...';
+        icon = Icons.psychology;
+        break;
+      case ChatStatus.speaking:
+        hint = '播放语音...';
+        icon = Icons.volume_up;
+        break;
+      case ChatStatus.idle:
+        hint = '正在连接...';
+        icon = Icons.hourglass_empty;
+        break;
+      default:
+        hint = '初始化中...';
+        icon = Icons.mic_off;
+    }
+
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            Icons.mic,
-            size: 80,
-            color: AppTheme.primaryColor.withOpacity(0.5),
-          ),
+          Icon(icon, size: 80, color: AppTheme.primaryColor.withOpacity(0.5)),
           const SizedBox(height: 16),
           Text(
-            '你好！我是 VoiceHub',
-            style: TextStyle(
-              fontSize: 20,
-              color: Colors.white.withOpacity(0.8),
-            ),
+            '你好！我是 VoiceClaw',
+            style: TextStyle(fontSize: 20, color: Colors.white.withOpacity(0.8)),
           ),
           const SizedBox(height: 8),
           Text(
-            '点击麦克风开始对话',
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.white.withOpacity(0.5),
-            ),
+            hint,
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 14, color: Colors.white.withOpacity(0.5)),
           ),
         ],
       ),
     );
   }
-  
+
   Widget _buildStatusBar(ChatState state) {
-    String statusText = '';
-    Color statusColor = Colors.transparent;
-    
+    String statusText;
+    Color statusColor;
+    bool showSpinner = false;
+
     switch (state.status) {
       case ChatStatus.idle:
-        return const SizedBox.shrink();
+        statusText = '● 等待连接';
+        statusColor = Colors.grey;
+        break;
       case ChatStatus.listening:
-        statusText = '🎤 正在聆听...';
+        statusText = '🎤 聆听中（说完等 3 秒）';
         statusColor = AppTheme.successColor;
         break;
       case ChatStatus.processing:
-        statusText = '⏳ 思考中...';
+        statusText = '⏳ AI 思考中...';
         statusColor = AppTheme.secondaryColor;
+        showSpinner = true;
         break;
       case ChatStatus.speaking:
         statusText = '🔊 播放语音...';
         statusColor = AppTheme.primaryColor;
+        break;
+      case ChatStatus.configRequired:
+        statusText = '⚠️ 请先配置';
+        statusColor = Colors.orange;
         break;
       case ChatStatus.error:
         statusText = '❌ ${state.errorMessage ?? "错误"}';
         statusColor = AppTheme.errorColor;
         break;
     }
-    
+
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       color: statusColor.withOpacity(0.2),
       child: Row(
         children: [
-          if (state.status == ChatStatus.processing)
+          if (showSpinner)
             const SizedBox(
               width: 16,
               height: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Colors.white,
-              ),
-            ),
-          if (state.status != ChatStatus.processing)
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+            )
+          else
             const SizedBox(width: 16),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              statusText,
-              style: TextStyle(
-                color: statusColor,
-                fontSize: 14,
-              ),
-            ),
+            child: Text(statusText, style: TextStyle(color: statusColor, fontSize: 14)),
           ),
         ],
       ),
     );
   }
-  
+
   void _showNewSessionDialog(BuildContext context) {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('新会话'),
-        content: const Text(
-          '开启新会话将：\n'
-          '• 清空当前对话记录\n'
-          '• 开始全新的对话\n'
-          '• 保留所有设置',
-        ),
+        content: const Text('开启新会话将清空当前对话记录。'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('取消'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('取消')),
           ElevatedButton(
             onPressed: () async {
-              // 生成新的 userId
               final newUserId = await globalSettingsService?.newSession() ?? '';
-              
               if (context.mounted) {
                 context.read<ChatBloc>().add(NewSession(newUserId));
                 Navigator.pop(dialogContext);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('已开启新会话')),
-                );
               }
             },
             child: const Text('开启新会话'),

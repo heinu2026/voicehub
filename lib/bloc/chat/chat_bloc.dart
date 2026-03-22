@@ -175,10 +175,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         debugPrint('TTS 播放失败: $e');
       }
 
-      // TTS 播完后继续聆听
-      Future.delayed(const Duration(milliseconds: 500), () {
-        _speechService.startListening();
-      });
+      // TTS 播完后进入空闲，等待用户手动触发下一轮
+      emit(state.copyWith(status: ChatStatus.idle));
 
     } catch (e) {
       emit(state.copyWith(
@@ -219,7 +217,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     }
 
     if (text.trim().isEmpty) {
-      _speechService.startListening();
+      // 空结果，不重启，等待用户手动触发
       return;
     }
 
@@ -257,18 +255,15 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         debugPrint('TTS 播放失败: $e');
       }
 
-      Future.delayed(const Duration(milliseconds: 500), () {
-        _speechService.startListening();
-      });
+      // 播完后进入空闲，等待用户手动触发下一轮
+      emit(state.copyWith(status: ChatStatus.idle));
 
     } catch (e) {
       emit(state.copyWith(
         status: ChatStatus.error,
         errorMessage: '获取回复失败: $e',
       ));
-      Future.delayed(const Duration(seconds: 2), () {
-        _speechService.startListening();
-      });
+      // 错误后不自动重启，等待用户操作
     }
   }
 

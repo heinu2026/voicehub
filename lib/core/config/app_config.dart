@@ -1,9 +1,7 @@
 /// 应用配置
 class AppConfig {
   // OpenClaw Gateway 地址
-  // 如果在同一网络，用 Mac 的局域网 IP
   static const String openClawBaseUrl = 'http://192.168.1.x:8000';
-  static const String openClawWsUrl = 'ws://192.168.1.x:8000';
   
   // OpenClaw Agent 配置
   static const String defaultAgentId = 'main';  // 默认 Agent
@@ -26,5 +24,5 @@ class AppConfig {
   static const int sampleRate = 16000;
   
   // Channel 标识
-  static const String channelName = 'voicehub';
+  static const String channelName = 'voiceclaw';
 }

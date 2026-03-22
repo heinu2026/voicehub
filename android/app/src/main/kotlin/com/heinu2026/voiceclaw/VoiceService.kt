@@ -1,4 +1,4 @@
-package com.heinu2026.voicehub
+package com.heinu2026.voiceclaw
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -17,7 +17,7 @@ import androidx.core.app.NotificationCompat
 class VoiceService : Service() {
     companion object {
         private const val TAG = "VoiceService"
-        private const val CHANNEL_ID = "voicehub_service"
+        private const val CHANNEL_ID = "voiceclaw_service"
         private const val NOTIFICATION_ID = 1
     }
     
@@ -43,7 +43,7 @@ class VoiceService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "VoiceHub 后台服务",
+                "VoiceClaw 后台服务",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "保持语音助手后台运行以监听唤醒词"
@@ -57,7 +57,7 @@ class VoiceService : Service() {
     
     private fun createNotification(): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("VoiceHub")
+            .setContentTitle("VoiceClaw")
             .setContentText("正在监听唤醒词...")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setPriority(NotificationCompat.PRIORITY_LOW)

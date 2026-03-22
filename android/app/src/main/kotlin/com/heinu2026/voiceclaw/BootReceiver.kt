@@ -1,4 +1,4 @@
-package com.heinu2026.voicehub
+package com.heinu2026.voiceclaw
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -7,7 +7,7 @@ import android.util.Log
 
 /**
  * 开机启动接收器
- * 设备启动后自动启动 VoiceHub
+ * 设备启动后自动启动 VoiceClaw
  */
 class BootReceiver : BroadcastReceiver() {
     companion object {
@@ -19,7 +19,7 @@ class BootReceiver : BroadcastReceiver() {
             intent.action == "android.intent.action.QUICKBOOT_POWERON" ||
             intent.action == "com.htc.intent.action.QUICKBOOT_POWERON") {
             
-            Log.i(TAG, "设备已启动，启动 VoiceHub")
+            Log.i(TAG, "设备已启动，启动 VoiceClaw")
             
             // 启动应用
             val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)

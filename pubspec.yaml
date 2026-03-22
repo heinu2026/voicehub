@@ -1,4 +1,4 @@
-name: voicehub
+name: voiceclaw
 description: Voice-enabled AI assistant powered by OpenClaw
 publish_to: 'none'
 version: 1.0.0+1
@@ -20,21 +20,17 @@ dependencies:
   equatable: ^2.0.5
   
   # Audio
-  record: ^5.0.4
+  flutter_sound: ^9.16.0
   flutter_tts: ^3.8.5
   audioplayers: ^5.2.1
   
-  # Speech Recognition
-  speech_to_text: ^6.3.0
+
   
   # Utils
   uuid: ^4.2.1
   shared_preferences: ^2.2.2
   permission_handler: ^11.1.0
-  path_provider: ^2.1.1
-  
-  # Wake Word (Porcupine)
-  porcupine: ^2.1.0
+  path_provider: ^2.0.15
 
 dev_dependencies:
   flutter_test:

@@ -1,32 +1,24 @@
-import 'dart:convert';
+import 'dart:async';
 import 'package:dio/dio.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
 import '../config/app_config.dart';
 
 class OpenClawService {
   late Dio _dio;
-  WebSocketChannel? _wsChannel;
   
   String _baseUrl;
-  String _wsUrl;
   String _agentId;
   String _model;
   String _userId;
-  
-  final _responseController = StreamController<String>.broadcast();
-  Stream<String> get onResponse => _responseController.stream;
   
   bool _isConnected = false;
   bool get isConnected => _isConnected;
   
   OpenClawService({
     String? baseUrl,
-    String? wsUrl,
     String? agentId,
     String? model,
     String? userId,
   })  : _baseUrl = baseUrl ?? AppConfig.openClawBaseUrl,
-        _wsUrl = wsUrl ?? AppConfig.openClawWsUrl,
         _agentId = agentId ?? AppConfig.defaultAgentId,
         _model = model ?? AppConfig.defaultModel,
         _userId = userId ?? '' {
@@ -45,13 +37,11 @@ class OpenClawService {
   /// 更新配置
   void updateConfig({
     String? baseUrl,
-    String? wsUrl,
     String? agentId,
     String? model,
     String? userId,
   }) {
     if (baseUrl != null) _baseUrl = baseUrl;
-    if (wsUrl != null) _wsUrl = wsUrl;
     if (agentId != null) _agentId = agentId;
     if (model != null) _model = model;
     if (userId != null) _userId = userId;
@@ -68,7 +58,7 @@ class OpenClawService {
     final params = <String, dynamic>{
       'message': message,
       'channel': AppConfig.channelName,
-      'user': _userId,  // Session 标识
+      'user': _userId,
     };
     
     if (_agentId.isNotEmpty && _agentId != AppConfig.defaultAgentId) {
@@ -85,6 +75,7 @@ class OpenClawService {
   /// 发送消息并获取回复
   Future<String> sendMessage(String text) async {
     try {
+      _isConnected = true;
       final response = await _dio.post(
         '/api/message',
         data: _buildParams(text),
@@ -93,8 +84,10 @@ class OpenClawService {
       return _parseReply(response.data);
       
     } on DioException catch (e) {
+      _isConnected = false;
       throw OpenClawException(_handleDioError(e));
     } catch (e) {
+      _isConnected = false;
       throw OpenClawException('解析响应失败: $e');
     }
   }
@@ -148,50 +141,8 @@ class OpenClawService {
     }
   }
   
-  /// 连接 WebSocket
-  Future<void> connectWebSocket() async {
-    try {
-      _wsChannel = WebSocketChannel.connect(Uri.parse(_wsUrl));
-      
-      _wsChannel!.stream.listen(
-        (data) {
-          try {
-            final json = jsonDecode(data as String);
-            final content = json['content'] ?? json['reply'] ?? json['message'] ?? '';
-            _responseController.add(content);
-          } catch (e) {
-            _responseController.add(data.toString());
-          }
-        },
-        onError: (_) => _isConnected = false,
-        onDone: () => _isConnected = false,
-      );
-      
-      _isConnected = true;
-    } catch (e) {
-      _isConnected = false;
-      throw OpenClawException('WebSocket 连接失败: $e');
-    }
-  }
-  
-  /// 通过 WebSocket 发送消息
-  void sendMessageWs(String text) {
-    if (_wsChannel == null || !_isConnected) {
-      throw OpenClawException('WebSocket 未连接');
-    }
-    _wsChannel!.sink.add(jsonEncode(_buildParams(text)));
-  }
-  
-  /// 断开 WebSocket
-  void disconnect() {
-    _wsChannel?.sink.close();
-    _wsChannel = null;
-    _isConnected = false;
-  }
-  
   void dispose() {
-    disconnect();
-    _responseController.close();
+    _isConnected = false;
     _dio.close();
   }
 }

@@ -234,6 +234,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
             const SizedBox(height: 32),
 
+            // Whisper STT 配置
+            _buildSectionTitle('🎤 Whisper STT'),
+            const SizedBox(height: 8),
+            Text(
+              '语音识别服务（OpenAI 兼容 API）',
+              style: TextStyle(color: Colors.grey[600], fontSize: 14),
+            ),
+            const SizedBox(height: 16),
+
+            TextField(
+              controller: _whisperUrlController,
+              decoration: _inputDecoration(
+                label: 'Whisper 服务器地址',
+                hint: 'http://192.168.1.x:9001',
+                icon: Icons.mic,
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            TextField(
+              controller: _whisperApiKeyController,
+              decoration: _inputDecoration(
+                label: 'API Key（可选）',
+                hint: '有认证时填写',
+                icon: Icons.key,
+              ),
+              obscureText: true,
+            ),
+
+            const SizedBox(height: 32),
+
             // OpenClaw 地址配置
             _buildSectionTitle('🌐 OpenClaw 地址'),
             const SizedBox(height: 8),

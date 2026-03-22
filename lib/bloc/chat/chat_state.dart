@@ -4,8 +4,9 @@ import '../../models/message.dart';
 enum ChatStatus {
   idle,           // 空闲
   listening,      // 正在听语音
-  processing,     // 处理中
+  processing,     // 处理中（AI 思考）
   speaking,       // 正在播放 TTS
+  configRequired, // 等待配置
   error,          // 错误
 }
 
@@ -13,9 +14,9 @@ class ChatState extends Equatable {
   final List<Message> messages;
   final ChatStatus status;
   final String? errorMessage;
-  final bool isVoiceInputActive;  // 语音输入激活
-  final double voiceLevel;        // 语音音量 (0-1)
-  
+  final bool isVoiceInputActive;
+  final double voiceLevel;
+
   const ChatState({
     this.messages = const [],
     this.status = ChatStatus.idle,
@@ -23,7 +24,7 @@ class ChatState extends Equatable {
     this.isVoiceInputActive = false,
     this.voiceLevel = 0,
   });
-  
+
   ChatState copyWith({
     List<Message>? messages,
     ChatStatus? status,
@@ -39,7 +40,7 @@ class ChatState extends Equatable {
       voiceLevel: voiceLevel ?? this.voiceLevel,
     );
   }
-  
+
   @override
   List<Object?> get props => [
     messages,
