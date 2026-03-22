@@ -218,23 +218,10 @@ class SettingsService {
     return url != AppConfig.defaultBaseUrl && url.isNotEmpty && !url.contains('192.168.1.x');
   }
 
-  /// Whisper URL - 如果没单独配置，从 OpenClaw 地址派生
+  /// Whisper URL - 必须显式配置
   String get whisperUrl {
-    final configured = _prefs?.getString(_keyWhisperUrl) ?? '';
-    if (configured.trim().isNotEmpty) return configured;
-    // 没单独配置，从 OpenClaw 地址派生
-    if (baseUrl.startsWith('http')) {
-      try {
-        final uri = Uri.parse(baseUrl);
-        return '${uri.scheme}://${uri.host}:12010';
-      } catch (_) {
-        return '';
-      }
-    }
-    return '';
+    return _prefs?.getString(_keyWhisperUrl) ?? '';
   }
-
-  /// 检查 Whisper STT 是否已配置
   bool get isWhisperConfigured {
     return whisperUrl.isNotEmpty;
   }

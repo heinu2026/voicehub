@@ -52,24 +52,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _saveSettings() async {
     // 先验证必填项
-    final whisperUrlInput = _whisperUrlController.text.trim();
+    final whisperUrl = _whisperUrlController.text.trim();
     final baseUrl = _baseUrlController.text.trim();
     final apiKey = _apiKeyController.text.trim();
 
-    // 计算实际生效的 Whisper URL：优先用用户输入，其次尝试从 baseUrl 派生
-    String effectiveWhisperUrl = whisperUrlInput;
-    if (effectiveWhisperUrl.isEmpty && baseUrl.isNotEmpty && baseUrl.startsWith('http')) {
-      try {
-        final uri = Uri.parse(baseUrl);
-        effectiveWhisperUrl = '${uri.scheme}://${uri.host}:12010';
-      } catch (_) {}
-    }
-
-    if (effectiveWhisperUrl.isEmpty) {
-      _showValidationError('请填写 Whisper 服务器地址，或先填写 OpenClaw 地址（用于派生）');
+    if (whisperUrl.isEmpty) {
+      _showValidationError('请填写 Whisper 服务器地址');
       return;
     }
-    if (!effectiveWhisperUrl.startsWith('http')) {
+    if (!whisperUrl.startsWith('http')) {
       _showValidationError('Whisper 地址必须以 http:// 或 https:// 开头');
       return;
     }
@@ -82,9 +73,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
 
-    // 用生效的 Whisper URL 写入（避免空值覆盖派生逻辑）
-    final whisperUrlToSave = whisperUrlInput.isNotEmpty ? whisperUrlInput : effectiveWhisperUrl;
-
     setState(() => _isSaving = true);
 
     // 必须等 SharedPreferences 写入完成后再导出
@@ -93,7 +81,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await widget.settingsService.setMinimaxApiKey(apiKey);
     await widget.settingsService.setTtsVoiceId(_selectedVoiceId);
     await widget.settingsService.setTtsSpeed(_ttsSpeed);
-    await widget.settingsService.setWhisperUrl(whisperUrlToSave);
+    await widget.settingsService.setWhisperUrl(whisperUrl);
     await widget.settingsService.setWhisperApiKey(_whisperApiKeyController.text.trim());
 
     // 保存后自动导出备份
