@@ -4,6 +4,10 @@ class AppConfig {
   static const String defaultBaseUrl = 'http://192.168.1.100:8080';
   static const String openClawBaseUrl = 'http://192.168.1.100:8080';
 
+  // OpenClaw 认证 Token（Bearer Token）
+  // TODO: 上线前建议移到设置页或环境变量
+  static const String defaultOpenClawToken = 'e9cec475b8d31abb40a4ec3c92b873c79e41174f09dd0bdc';
+
   // STT 服务端口（OpenClaw 网关本地端口）
   static const int sttPort = 8080;
 

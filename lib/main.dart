@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'config/app_config.dart';
 import 'core/theme/app_theme.dart';
 import 'services/openclaw_service.dart';
 import 'services/speech_service.dart';
@@ -32,6 +33,7 @@ void main() async {
     baseUrl: settingsService.baseUrl,
     agentId: settingsService.agentId,
     userId: settingsService.userId,
+    authToken: AppConfig.defaultOpenClawToken,
   );
 
   final whisperSttService = WhisperSttService();
