@@ -1,54 +1,160 @@
+import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
-import '../core/config/app_config.dart';
+import '../config/app_config.dart';
 
 /// 设置服务 - 管理应用配置
+/// 支持导出/导入配置文件，重装后可以恢复
 class SettingsService {
   // Keys
   static const String _keyBaseUrl = 'openclaw_base_url';
-  static const String _keyWsUrl = 'openclaw_ws_url';
   static const String _keyAgentId = 'openclaw_agent_id';
-  static const String _keyModel = 'openclaw_model';
   static const String _keyUserId = 'openclaw_user_id';
-  
+  static const String _keyMinimaxApiKey = 'minimax_api_key';
+  static const String _keyTtsVoiceId = 'tts_voice_id';
+  static const String _keyTtsSpeed = 'tts_speed';
+  static const String _keyWhisperUrl = 'whisper_url';
+  static const String _keyWhisperApiKey = 'whisper_api_key';
+  static const String _keyWhisperModel = 'whisper_model';
+
   SharedPreferences? _prefs;
   final _uuid = const Uuid();
-  
+
+  /// 配置文件路径（存放在应用私有目录，重装会丢失）
+  String? _configFilePath;
+
   /// 初始化
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
+    // 尝试自动导入已存在的配置文件
+    await _tryAutoImport();
+  }
+
+  /// 获取配置文件的路径（Downloads 目录，重装后保留）
+  Future<String> get configFilePath async {
+    if (_configFilePath != null) return _configFilePath!;
+    // 使用 Downloads 目录，重装后不会被删除
+    final dir = await getExternalStorageDirectory();
+    if (dir != null) {
+      // 去掉 Android 的 /Android/data/... 路径，指向真实的 Downloads
+      _configFilePath = '/storage/emulated/0/Download/voiceclaw_config.json';
+    } else {
+      // fallback 到应用文档目录
+      final fallback = await getApplicationDocumentsDirectory();
+      _configFilePath = '${fallback.path}/voiceclaw_config.json';
+    }
+    return _configFilePath!;
+  }
+
+  /// 导出配置到文件
+  Future<String?> exportConfig() async {
+    try {
+      final path = await configFilePath;
+      final config = {
+        'version': 1,
+        'baseUrl': baseUrl,
+        'agentId': agentId,
+        'userId': userId,
+        'minimaxApiKey': minimaxApiKey,
+        'ttsVoiceId': ttsVoiceId,
+        'ttsSpeed': ttsSpeed,
+        'whisperUrl': whisperUrl,
+        'whisperApiKey': whisperApiKey,
+        'whisperModel': whisperModel,
+      };
+      final file = File(path);
+      await file.writeAsString(jsonEncode(config), flush: true);
+      debugPrint('SettingsService: 配置已导出到 $path, whisperUrl=$whisperUrl');
+      return path;
+    } catch (e, st) {
+      debugPrint('SettingsService: 导出失败 $e $st');
+      return null;
+    }
+  }
+
+  /// 从文件导入配置
+  Future<bool> importConfig() async {
+    try {
+      final path = await configFilePath;
+      final file = File(path);
+      if (!await file.exists()) {
+        debugPrint('SettingsService: 配置文件不存在');
+        return false;
+      }
+      final content = await file.readAsString();
+      final config = jsonDecode(content) as Map<String, dynamic>;
+
+      await setBaseUrl(config['baseUrl'] ?? '');
+      await setAgentId(config['agentId'] ?? '');
+      // userId: 旧版配置可能没有，有则用之，空则生成新的
+      final importedUserId = config['userId'];
+      await _prefs?.setString(_keyUserId, (importedUserId != null && importedUserId.toString().isNotEmpty) ? importedUserId.toString() : _uuid.v4());
+      await setMinimaxApiKey(config['minimaxApiKey'] ?? '');
+      await setTtsVoiceId(config['ttsVoiceId'] ?? AppConfig.ttsDefaultVoiceId);
+      await setTtsSpeed((config['ttsSpeed'] ?? 1.0).toDouble());
+      await setWhisperUrl(config['whisperUrl'] ?? '');
+      await setWhisperApiKey(config['whisperApiKey'] ?? '');
+      await setWhisperModel(config['whisperModel'] ?? AppConfig.defaultWhisperModel);
+
+      debugPrint('SettingsService: 配置导入成功');
+      return true;
+    } catch (e) {
+      debugPrint('SettingsService: 导入失败 $e');
+      return false;
+    }
+  }
+
+  /// 启动时自动尝试导入
+  Future<void> _tryAutoImport() async {
+    try {
+      final path = await configFilePath;
+      final file = File(path);
+      final exists = await file.exists();
+      debugPrint('SettingsService: 检查配置文件 $path, 存在=$exists');
+      if (exists) {
+        debugPrint('SettingsService: 发现配置文件，自动导入');
+        final ok = await importConfig();
+        debugPrint('SettingsService: 导入结果=$ok, whisperUrl=${whisperUrl}');
+      } else {
+        debugPrint('SettingsService: 配置文件不存在');
+      }
+    } catch (e, st) {
+      debugPrint('SettingsService: 自动导入失败 $e $st');
+    }
+  }
+
+  /// 获取导出文件路径（供外部分享）
+  Future<String?> getExportPath() async {
+    try {
+      final path = await configFilePath;
+      if (await File(path).exists()) {
+        return path;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
   }
   
   // ========== URL 配置 ==========
   
   String get baseUrl => _prefs?.getString(_keyBaseUrl) ?? AppConfig.defaultBaseUrl;
-  String get wsUrl => _prefs?.getString(_keyWsUrl) ?? AppConfig.defaultWsUrl;
   
   Future<bool> setBaseUrl(String url) async {
     return await _prefs?.setString(_keyBaseUrl, url) ?? false;
   }
   
-  Future<bool> setWsUrl(String url) async {
-    return await _prefs?.setString(_keyWsUrl, url) ?? false;
-  }
-  
-  Future<void> setUrls({required String baseUrl, required String wsUrl}) async {
-    await _prefs?.setString(_keyBaseUrl, baseUrl);
-    await _prefs?.setString(_keyWsUrl, wsUrl);
-  }
-  
   // ========== Agent 配置 ==========
   
   String get agentId => _prefs?.getString(_keyAgentId) ?? AppConfig.defaultAgentId;
-  String get model => _prefs?.getString(_keyModel) ?? AppConfig.defaultModel;
   
   Future<bool> setAgentId(String agentId) async {
     return await _prefs?.setString(_keyAgentId, agentId) ?? false;
   }
   
-  Future<bool> setModel(String model) async {
-    return await _prefs?.setString(_keyModel, model) ?? false;
-  }
   
   // ========== Session / User 配置 ==========
   
@@ -70,10 +176,88 @@ class SettingsService {
     return newId;
   }
   
+  // ========== Minimax TTS 配置 ==========
+
+  String get minimaxApiKey => _prefs?.getString(_keyMinimaxApiKey) ?? '';
+  String get ttsVoiceId => _prefs?.getString(_keyTtsVoiceId) ?? AppConfig.ttsDefaultVoiceId;
+  double get ttsSpeed => _prefs?.getDouble(_keyTtsSpeed) ?? AppConfig.ttsDefaultSpeed;
+
+  Future<bool> setMinimaxApiKey(String key) async {
+    return await _prefs?.setString(_keyMinimaxApiKey, key) ?? false;
+  }
+
+  Future<bool> setTtsVoiceId(String voiceId) async {
+    return await _prefs?.setString(_keyTtsVoiceId, voiceId) ?? false;
+  }
+
+  Future<bool> setTtsSpeed(double speed) async {
+    return await _prefs?.setDouble(_keyTtsSpeed, speed) ?? false;
+  }
+
+  // ========== Whisper STT 配置 ==========
+
+  String get whisperApiKey => _prefs?.getString(_keyWhisperApiKey) ?? AppConfig.defaultWhisperApiKey;
+  String get whisperModel => _prefs?.getString(_keyWhisperModel) ?? AppConfig.defaultWhisperModel;
+
+  Future<bool> setWhisperUrl(String url) async {
+    return await _prefs?.setString(_keyWhisperUrl, url) ?? false;
+  }
+
+  Future<bool> setWhisperApiKey(String key) async {
+    return await _prefs?.setString(_keyWhisperApiKey, key) ?? false;
+  }
+
+  Future<bool> setWhisperModel(String model) async {
+    return await _prefs?.setString(_keyWhisperModel, model) ?? false;
+  }
+
   // ========== 工具 ==========
   
   bool get isConfigured {
     final url = baseUrl;
     return url != AppConfig.defaultBaseUrl && url.isNotEmpty && !url.contains('192.168.1.x');
+  }
+
+  /// Whisper URL - 如果没单独配置，从 OpenClaw 地址派生
+  String get whisperUrl {
+    final configured = _prefs?.getString(_keyWhisperUrl) ?? '';
+    if (configured.trim().isNotEmpty) return configured;
+    // 没单独配置，从 OpenClaw 地址派生
+    if (baseUrl.startsWith('http')) {
+      try {
+        final uri = Uri.parse(baseUrl);
+        return '${uri.scheme}://${uri.host}:12010';
+      } catch (_) {
+        return '';
+      }
+    }
+    return '';
+  }
+
+  /// 检查 Whisper STT 是否已配置
+  bool get isWhisperConfigured {
+    return whisperUrl.isNotEmpty;
+  }
+
+  /// 检查 MiniMax TTS 是否已配置
+  bool get isTtsConfigured {
+    return minimaxApiKey.isNotEmpty;
+  }
+
+  /// 检查 OpenClaw 是否已配置
+  bool get isOpenClawConfigured {
+    return baseUrl.isNotEmpty && baseUrl.startsWith('http');
+  }
+
+  /// 检查所有核心配置是否完整
+  bool get isAllConfigured {
+    return isOpenClawConfigured;
+  }
+
+  /// 获取未配置项列表
+  List<String> get missingConfigItems {
+    final missing = <String>[];
+    if (!isOpenClawConfigured) missing.add('OpenClaw 地址');
+    return missing;
   }
 }
