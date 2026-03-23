@@ -17,6 +17,7 @@ class OpenClawService {
   /// SSE 流式响应控制器
   StreamController<String>? _streamController;
   CancelToken? _currentCancelToken;
+  String? _currentEventType;
 
   OpenClawService({
     String? baseUrl,
@@ -141,6 +142,13 @@ class OpenClawService {
           final line = buffer.substring(0, lineEnd).trim();
           buffer = buffer.substring(lineEnd + 1);
 
+          // 处理 SSE 事件行: event: response.output_text.delta
+          if (line.startsWith('event: ')) {
+            _currentEventType = line.substring(7).trim();
+            continue;
+          }
+
+          // 处理 SSE 数据行: data: {"content": "..."}
           if (line.startsWith('data: ')) {
             final data = line.substring(6);
 
@@ -149,12 +157,17 @@ class OpenClawService {
               return;
             }
 
-            final parsed = _parseSseChunk(data);
-            if (parsed != null && parsed.isNotEmpty) {
-              if (!_streamController!.isClosed) {
-                _streamController!.add(parsed);
+            // 只处理文本 delta 事件
+            if (_currentEventType == 'response.output_text.delta') {
+              final parsed = _parseSseChunk(data);
+              if (parsed != null && parsed.isNotEmpty) {
+                if (!_streamController!.isClosed) {
+                  _streamController!.add(parsed);
+                }
               }
             }
+
+            _currentEventType = null;
           }
         }
       }
