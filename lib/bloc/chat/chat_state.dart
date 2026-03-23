@@ -16,6 +16,10 @@ class ChatState extends Equatable {
   final String? errorMessage;
   final bool isVoiceInputActive;
   final double voiceLevel;
+  final bool isWakeWordEnabled;
+  final bool isWakeWordReady;
+  final bool isWakeWordListening;
+  final String partialText;
 
   const ChatState({
     this.messages = const [],
@@ -23,6 +27,10 @@ class ChatState extends Equatable {
     this.errorMessage,
     this.isVoiceInputActive = false,
     this.voiceLevel = 0,
+    this.isWakeWordEnabled = false,
+    this.isWakeWordReady = false,
+    this.isWakeWordListening = false,
+    this.partialText = '',
   });
 
   ChatState copyWith({
@@ -31,6 +39,10 @@ class ChatState extends Equatable {
     String? errorMessage,
     bool? isVoiceInputActive,
     double? voiceLevel,
+    bool? isWakeWordEnabled,
+    bool? isWakeWordReady,
+    bool? isWakeWordListening,
+    String? partialText,
   }) {
     return ChatState(
       messages: messages ?? this.messages,
@@ -38,6 +50,10 @@ class ChatState extends Equatable {
       errorMessage: errorMessage,
       isVoiceInputActive: isVoiceInputActive ?? this.isVoiceInputActive,
       voiceLevel: voiceLevel ?? this.voiceLevel,
+      isWakeWordEnabled: isWakeWordEnabled ?? this.isWakeWordEnabled,
+      isWakeWordReady: isWakeWordReady ?? this.isWakeWordReady,
+      isWakeWordListening: isWakeWordListening ?? this.isWakeWordListening,
+      partialText: partialText ?? this.partialText,
     );
   }
 
@@ -48,5 +64,9 @@ class ChatState extends Equatable {
     errorMessage,
     isVoiceInputActive,
     voiceLevel,
+    isWakeWordEnabled,
+    isWakeWordReady,
+    isWakeWordListening,
+    partialText,
   ];
 }

@@ -47,6 +47,15 @@ class ConversationListeningResult extends ChatEvent {
   List<Object?> get props => [recognizedText];
 }
 
+/// 部分转写结果（用于实时显示，不触发 AI）
+class PartialListeningResult extends ChatEvent {
+  final String partialText;
+  const PartialListeningResult(this.partialText);
+
+  @override
+  List<Object?> get props => [partialText];
+}
+
 /// 聆听状态变化
 class ListeningStatusChanged extends ChatEvent {
   final bool isActive;
@@ -67,3 +76,9 @@ class VoiceLevelChanged extends ChatEvent {
 
 /// 从设置页返回，开始聆听
 class StartListening extends ChatEvent {}
+
+/// 唤醒词被检测到
+class WakeWordDetected extends ChatEvent {}
+
+/// 切换唤醒词启用状态
+class ToggleWakeWord extends ChatEvent {}

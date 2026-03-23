@@ -30,7 +30,7 @@ class ChatScreen extends StatelessWidget {
         children: [
           // 状态栏
           BlocBuilder<ChatBloc, ChatState>(
-            builder: (context, state) => _buildStatusBar(state),
+            builder: (context, state) => _buildStatusBar(context, state),
           ),
 
           // 对话列表
@@ -180,7 +180,7 @@ class ChatScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildStatusBar(ChatState state) {
+  Widget _buildStatusBar(BuildContext context, ChatState state) {
     String statusText;
     Color statusColor;
     bool showSpinner = false;
@@ -213,6 +213,14 @@ class ChatScreen extends StatelessWidget {
         break;
     }
 
+    // 唤醒词状态指示
+    String? wakeWordHint;
+    if (state.isWakeWordReady && state.isWakeWordEnabled) {
+      wakeWordHint = ' 🪄 唤醒词已开启';
+    } else if (!state.isWakeWordReady) {
+      wakeWordHint = ' ⚠️ 唤醒词未配置';
+    }
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
@@ -229,8 +237,34 @@ class ChatScreen extends StatelessWidget {
             const SizedBox(width: 16),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(statusText, style: TextStyle(color: statusColor, fontSize: 14)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(statusText, style: TextStyle(color: statusColor, fontSize: 14)),
+                if (wakeWordHint != null)
+                  Text(
+                    wakeWordHint,
+                    style: TextStyle(
+                      color: statusColor.withOpacity(0.7),
+                      fontSize: 11,
+                    ),
+                  ),
+              ],
+            ),
           ),
+          // 唤醒词切换按钮
+          if (state.isWakeWordReady)
+            IconButton(
+              icon: Icon(
+                state.isWakeWordEnabled ? Icons.toggle_on : Icons.toggle_off,
+                color: state.isWakeWordEnabled ? AppTheme.successColor : Colors.grey,
+              ),
+              onPressed: () {
+                context.read<ChatBloc>().add(ToggleWakeWord());
+              },
+              tooltip: state.isWakeWordEnabled ? '关闭唤醒词' : '开启唤醒词',
+            ),
         ],
       ),
     );

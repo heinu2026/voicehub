@@ -218,10 +218,19 @@ class SettingsService {
     return url != AppConfig.defaultBaseUrl && url.isNotEmpty && !url.contains('192.168.1.x');
   }
 
-  /// Whisper URL - 必须显式配置
+  /// Whisper URL - 必须显式配置（HTTP URL，用户在设置中填写）
   String get whisperUrl {
     return _prefs?.getString(_keyWhisperUrl) ?? '';
   }
+
+  /// Whisper WebSocket URL（自动从 whisperUrl 转换 http:// → ws://）
+  String get whisperWsUrl {
+    final url = whisperUrl;
+    if (url.isEmpty) return '';
+    // 自动转换 http:// → ws://
+    return url.replaceFirst('http://', 'ws://').replaceFirst('https://', 'wss://');
+  }
+
   bool get isWhisperConfigured {
     return whisperUrl.isNotEmpty;
   }

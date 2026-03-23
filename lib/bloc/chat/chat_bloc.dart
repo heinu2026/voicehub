@@ -2,11 +2,13 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:uuid/uuid.dart';
+import 'package:audioplayers/audioplayers.dart';
 import '../../models/message.dart';
 import '../../services/openclaw_service.dart';
 import '../../services/speech_service.dart';
 import '../../services/settings_service.dart';
 import '../../services/tts_service.dart';
+import '../../services/wake_word_service.dart';
 import 'chat_event.dart';
 import 'chat_state.dart';
 
@@ -22,21 +24,31 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   final TtsService _ttsService;
   final SettingsService _settingsService;
 
+  /// 唤醒词服务（可选，未配置时为 null）
+  WakeWordService? _wakeWordService;
+
   StreamSubscription? _speechResultSubscription;
+  StreamSubscription? _speechPartialSubscription;
   StreamSubscription? _speechStatusSubscription;
   StreamSubscription? _speechDecibelSubscription;
+  StreamSubscription? _wakeWordStatusSubscription;
 
   final _uuid = const Uuid();
+
+  /// 确认音效播放器
+  final AudioPlayer _dingPlayer = AudioPlayer();
 
   ChatBloc({
     required OpenClawService openClawService,
     required SpeechService speechService,
     required TtsService ttsService,
     required SettingsService settingsService,
+    WakeWordService? wakeWordService,
   })  : _openClawService = openClawService,
         _speechService = speechService,
         _ttsService = ttsService,
         _settingsService = settingsService,
+        _wakeWordService = wakeWordService,
         super(const ChatState()) {
 
     on<Initialize>(_onInitialize);
@@ -46,16 +58,24 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     on<ClearMessages>(_onClearMessages);
     on<NewSession>(_onNewSession);
     on<ConversationListeningResult>(_onConversationListeningResult);
+    on<PartialListeningResult>(_onPartialListeningResult);
     on<ListeningStatusChanged>(_onListeningStatusChanged);
     on<VoiceLevelChanged>(_onVoiceLevelChanged);
     on<StartListening>(_onStartListening);
+    on<WakeWordDetected>(_onWakeWordDetected);
+    on<ToggleWakeWord>(_onToggleWakeWord);
+  }
+
+  /// 设置 WakeWordService（可在初始化后注入）
+  void setWakeWordService(WakeWordService service) {
+    _wakeWordService = service;
   }
 
   Future<void> _onInitialize(Initialize event, Emitter<ChatState> emit) async {
     await _speechService.init();
     await _ttsService.init();
 
-    // 监听语音识别结果
+    // 监听语音识别结果（final - 触发 AI）
     _speechResultSubscription?.cancel();
     _speechResultSubscription = _speechService.onResult.listen((text) {
       if (text.isNotEmpty) {
@@ -63,18 +83,29 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       }
     });
 
-    // 监听聆听状态 → 用事件而非直接 emit
+    // 监听 partial 结果（实时显示，不触发 AI）
+    _speechPartialSubscription?.cancel();
+    _speechPartialSubscription = _speechService.onPartial.listen((text) {
+      if (text.isNotEmpty) {
+        add(PartialListeningResult(text));
+      }
+    });
+
+    // 监听聆听状态
     _speechStatusSubscription?.cancel();
     _speechStatusSubscription = _speechService.onStatus.listen((isActive) {
       add(ListeningStatusChanged(isActive));
     });
 
-    // 监听音量 → 用事件而非直接 emit
+    // 监听音量
     _speechDecibelSubscription?.cancel();
     _speechDecibelSubscription = _speechService.onDecibel.listen((db) {
       final level = ((db + 60) / 60).clamp(0.0, 1.0);
       add(VoiceLevelChanged(level));
     });
+
+    // 初始化唤醒词服务
+    await _initWakeWordService(emit);
 
     // 检测配置
     if (!_settingsService.isAllConfigured) {
@@ -87,35 +118,6 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       return;
     }
 
-    // Whisper STT 必须可用（显式配置或从 baseUrl 派生）
-    if (!_settingsService.isWhisperConfigured) {
-      debugPrint('ChatBloc: Whisper 未配置');
-      emit(state.copyWith(
-        status: ChatStatus.configRequired,
-        errorMessage: '请先配置 Whisper STT 服务器地址',
-      ));
-      return;
-    }
-
-    // 配置 OK，立即开始聆听
-    _speechService.startListening();
-    emit(state.copyWith(status: ChatStatus.listening));
-  }
-
-  void _onListeningStatusChanged(ListeningStatusChanged event, Emitter<ChatState> emit) {
-    if (event.isActive) {
-      emit(state.copyWith(status: ChatStatus.listening, voiceLevel: 0));
-    }
-  }
-
-  void _onVoiceLevelChanged(VoiceLevelChanged event, Emitter<ChatState> emit) {
-    emit(state.copyWith(voiceLevel: event.level));
-  }
-
-  /// 从设置页返回后，直接开始聆听
-  void _onStartListening(StartListening event, Emitter<ChatState> emit) {
-    debugPrint('ChatBloc: StartListening 触发，当前状态=${state.status}，whisperUrl=${_settingsService.whisperUrl}');
-
     // Whisper STT 必须可用
     if (!_settingsService.isWhisperConfigured) {
       debugPrint('ChatBloc: Whisper 未配置');
@@ -126,14 +128,185 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       return;
     }
 
-    // 先停止当前录音（防止重复）
-    _speechService.stop();
-    // 重新开始聆听
+    // 配置 OK，启动语音监听（唤醒词模式或手动模式）
     _speechService.startListening();
-    emit(state.copyWith(status: ChatStatus.listening, voiceLevel: 0));
+    emit(state.copyWith(status: ChatStatus.listening));
   }
 
-  Future<void> _onSendTextMessage(SendTextMessage event, Emitter<ChatState> emit) async {
+  /// 初始化唤醒词服务
+  Future<void> _initWakeWordService(Emitter<ChatState> emit) async {
+    if (_wakeWordService == null) {
+      debugPrint('ChatBloc: 未配置 WakeWordService');
+      emit(state.copyWith(isWakeWordEnabled: false, isWakeWordReady: false));
+      return;
+    }
+
+    try {
+      await _wakeWordService!.init();
+
+      // 设置唤醒词检测回调
+      _wakeWordService!.setOnWakeWordDetected(() {
+        debugPrint('ChatBloc: 收到 WakeWordDetected 事件');
+        add(WakeWordDetected());
+      });
+
+      // 监听唤醒词服务状态
+      _wakeWordStatusSubscription?.cancel();
+      _wakeWordStatusSubscription = _wakeWordService!.onStatus.listen((isListening) {
+        debugPrint('ChatBloc: WakeWord 监听状态=$isListening');
+        emit(state.copyWith(isWakeWordListening: isListening));
+      });
+
+      // 尝试加载默认模型
+      const modelPath = 'assets/models/hey_voiceclaw.pmdl';
+      final modelReady = await _wakeWordService!.prepare(modelPath);
+
+      if (modelReady) {
+        debugPrint('ChatBloc: WakeWord 模型加载成功');
+        emit(state.copyWith(
+          isWakeWordEnabled: true,
+          isWakeWordReady: true,
+        ));
+
+        // 自动开始持续监听
+        await _wakeWordService!.startListening();
+        emit(state.copyWith(isWakeWordListening: true));
+      } else {
+        debugPrint('ChatBloc: WakeWord 模型加载失败（文件不存在或无效）');
+        debugPrint('ChatBloc: 请按照 assets/models/README.md 训练你的唤醒词模型');
+        emit(state.copyWith(
+          isWakeWordEnabled: false,
+          isWakeWordReady: false,
+        ));
+      }
+    } catch (e) {
+      debugPrint('ChatBloc: WakeWordService 初始化失败 $e');
+      emit(state.copyWith(isWakeWordEnabled: false, isWakeWordReady: false));
+    }
+  }
+
+  /// 唤醒词被检测到
+  Future<void> _onWakeWordDetected(
+      WakeWordDetected event, Emitter<ChatState> emit) async {
+    debugPrint('ChatBloc: 唤醒词检测触发！');
+
+    // 1. 停止 WakeWord 持续监听（避免重复触发）
+    if (_wakeWordService?.isListening == true) {
+      await _wakeWordService!.stopListening();
+    }
+
+    // 2. 播放确认音效 "叮"
+    try {
+      await _playDingSound();
+      debugPrint('ChatBloc: 确认音效播放完成');
+    } catch (e) {
+      debugPrint('ChatBloc: 确认音效播放失败 $e');
+    }
+
+    // 3. 重置音量，清空 partial，清除之前状态
+    emit(state.copyWith(voiceLevel: 0, partialText: ''));
+
+    // 4. 开始录音（复用 SpeechService 的 VAD 逻辑）
+    // 先确保之前的录音已停止
+    await _speechService.stop();
+
+    // 5. 告知 UI：进入"唤醒后等待说话"状态
+    emit(state.copyWith(status: ChatStatus.listening));
+
+    // 6. 开始录音
+    try {
+      await _speechService.startListening();
+    } catch (e) {
+      debugPrint('ChatBloc: 启动语音监听失败 $e');
+      // 失败时尝试恢复唤醒词监听
+      await _resumeWakeWordListening();
+    }
+  }
+
+  /// 播放唤醒确认音效
+  Future<void> _playDingSound() async {
+    try {
+      // 优先用内置音效文件
+      await _dingPlayer.setSource(AssetSource('audio/ding.wav'));
+      await _dingPlayer.resume();
+    } catch (e) {
+      // 文件不存在时，用系统提示音（TTS 引擎未初始化前只能这样）
+      debugPrint('ChatBloc: 音效文件不存在，跳过: $e');
+    }
+  }
+
+  /// 恢复唤醒词持续监听
+  Future<void> _resumeWakeWordListening() async {
+    if (_wakeWordService != null && state.isWakeWordEnabled) {
+      await _wakeWordService!.startListening();
+    }
+  }
+
+  /// 切换唤醒词启用/禁用
+  Future<void> _onToggleWakeWord(
+      ToggleWakeWord event, Emitter<ChatState> emit) async {
+    if (_wakeWordService == null) return;
+
+    final newEnabled = !state.isWakeWordEnabled;
+
+    if (newEnabled) {
+      // 启用：先停止语音监听，再启动唤醒词
+      await _speechService.stop();
+      final ok = await _wakeWordService!.prepare('assets/models/hey_voiceclaw.pmdl');
+      if (ok) {
+        await _wakeWordService!.startListening();
+        emit(state.copyWith(
+          isWakeWordEnabled: true,
+          isWakeWordReady: true,
+          isWakeWordListening: true,
+          status: ChatStatus.idle,
+        ));
+      }
+    } else {
+      // 禁用：停止唤醒词，开始语音监听
+      await _wakeWordService!.stopListening();
+      await _speechService.startListening();
+      emit(state.copyWith(
+        isWakeWordEnabled: false,
+        isWakeWordListening: false,
+        status: ChatStatus.listening,
+      ));
+    }
+  }
+
+  void _onListeningStatusChanged(
+      ListeningStatusChanged event, Emitter<ChatState> emit) {
+    if (event.isActive) {
+      emit(state.copyWith(status: ChatStatus.listening, voiceLevel: 0));
+    }
+  }
+
+  void _onVoiceLevelChanged(
+      VoiceLevelChanged event, Emitter<ChatState> emit) {
+    emit(state.copyWith(voiceLevel: event.level));
+  }
+
+  /// 从设置页返回后，开始聆听
+  void _onStartListening(StartListening event, Emitter<ChatState> emit) {
+    debugPrint(
+        'ChatBloc: StartListening 触发，当前状态=${state.status}，whisperUrl=${_settingsService.whisperUrl}');
+
+    if (!_settingsService.isWhisperConfigured) {
+      debugPrint('ChatBloc: Whisper 未配置');
+      emit(state.copyWith(
+        status: ChatStatus.configRequired,
+        errorMessage: '请先配置 Whisper STT 服务器地址',
+      ));
+      return;
+    }
+
+    _speechService.stop();
+    _speechService.startListening();
+    emit(state.copyWith(status: ChatStatus.listening, voiceLevel: 0, partialText: ''));
+  }
+
+  Future<void> _onSendTextMessage(
+      SendTextMessage event, Emitter<ChatState> emit) async {
     if (event.text.trim().isEmpty) return;
 
     if (_containsExitKeyword(event.text)) {
@@ -175,8 +348,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         debugPrint('TTS 播放失败: $e');
       }
 
-      // TTS 播完后进入空闲，等待用户手动触发下一轮
+      // TTS 播完后，唤醒词模式恢复监听，否则进入空闲
       emit(state.copyWith(status: ChatStatus.idle));
+      await _resumeWakeWordListening();
 
     } catch (e) {
       emit(state.copyWith(
@@ -186,9 +360,11 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     }
   }
 
-  Future<void> _onStopListening(StopListening event, Emitter<ChatState> emit) async {
+  Future<void> _onStopListening(
+      StopListening event, Emitter<ChatState> emit) async {
     await _speechService.stop();
     emit(state.copyWith(status: ChatStatus.idle, voiceLevel: 0));
+    await _resumeWakeWordListening();
   }
 
   Future<void> _onStopTts(StopTts event, Emitter<ChatState> emit) async {
@@ -196,11 +372,13 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     emit(state.copyWith(status: ChatStatus.idle));
   }
 
-  Future<void> _onClearMessages(ClearMessages event, Emitter<ChatState> emit) async {
+  Future<void> _onClearMessages(
+      ClearMessages event, Emitter<ChatState> emit) async {
     emit(state.copyWith(messages: [], status: ChatStatus.idle));
   }
 
-  Future<void> _onNewSession(NewSession event, Emitter<ChatState> emit) async {
+  Future<void> _onNewSession(
+      NewSession event, Emitter<ChatState> emit) async {
     _openClawService.setUserId(event.newUserId);
     emit(state.copyWith(messages: [], status: ChatStatus.idle));
   }
@@ -219,6 +397,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
     if (text.trim().isEmpty) {
       // 空结果，不重启，等待用户手动触发
+      await _resumeWakeWordListening();
       return;
     }
 
@@ -233,6 +412,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     emit(state.copyWith(
       messages: [...state.messages, userMessage],
       status: ChatStatus.processing,
+      partialText: '', // 清空 partial 显示
     ));
 
     try {
@@ -256,16 +436,27 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         debugPrint('TTS 播放失败: $e');
       }
 
-      // 播完后进入空闲，等待用户手动触发下一轮
+      // 播完后恢复唤醒词监听
       emit(state.copyWith(status: ChatStatus.idle));
+      await _resumeWakeWordListening();
 
     } catch (e) {
       emit(state.copyWith(
         status: ChatStatus.error,
         errorMessage: '获取回复失败: $e',
       ));
-      // 错误后不自动重启，等待用户操作
+      await _resumeWakeWordListening();
     }
+  }
+
+  /// Partial 结果：实时更新 UI 显示，不触发 AI
+  void _onPartialListeningResult(
+      PartialListeningResult event, Emitter<ChatState> emit) {
+    debugPrint('ChatBloc: partial "$event.partialText"');
+    emit(state.copyWith(
+      partialText: event.partialText,
+      status: ChatStatus.listening,
+    ));
   }
 
   bool _containsExitKeyword(String text) {
@@ -276,11 +467,15 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   @override
   Future<void> close() {
     _speechResultSubscription?.cancel();
+    _speechPartialSubscription?.cancel();
     _speechStatusSubscription?.cancel();
     _speechDecibelSubscription?.cancel();
+    _wakeWordStatusSubscription?.cancel();
+    _dingPlayer.dispose();
     _openClawService.dispose();
     _speechService.dispose();
     _ttsService.dispose();
+    _wakeWordService?.dispose();
     return super.close();
   }
 }

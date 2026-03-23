@@ -10,6 +10,7 @@ import 'services/speech_service.dart';
 import 'services/whisper_stt_service.dart';
 import 'services/tts_service.dart';
 import 'services/settings_service.dart';
+import 'services/wake_word_service.dart';
 import 'bloc/chat/chat_bloc.dart';
 import 'bloc/chat/chat_event.dart';
 import 'ui/screens/chat_screen.dart';
@@ -40,10 +41,10 @@ void main() async {
   try {
     final ok = await whisperSttService.init();
     if (ok) {
-      whisperSttService.setWhisperUrl(settingsService.whisperUrl);
+      whisperSttService.setWhisperUrl(settingsService.whisperWsUrl);
       whisperSttService.setApiKey(settingsService.whisperApiKey);
       whisperSttService.setModel(settingsService.whisperModel);
-      debugPrint('Whisper STT 服务初始化成功: ${settingsService.whisperUrl}');
+      debugPrint('Whisper STT 服务初始化成功 (WS): ${settingsService.whisperWsUrl}');
     }
   } catch (e) {
     debugPrint('Whisper STT 服务初始化失败: $e');
@@ -58,11 +59,15 @@ void main() async {
 
   globalSettingsService = settingsService;
 
+  // 初始化唤醒词服务（可选，模型不存在时自动降级）
+  final wakeWordService = WakeWordService();
+
   runApp(VoiceClawApp(
     settingsService: settingsService,
     openClawService: openClawService,
     speechService: speechService,
     ttsService: ttsService,
+    wakeWordService: wakeWordService,
   ));
 }
 
@@ -90,6 +95,7 @@ class VoiceClawApp extends StatelessWidget {
   final OpenClawService openClawService;
   final SpeechService speechService;
   final TtsService ttsService;
+  final WakeWordService wakeWordService;
 
   const VoiceClawApp({
     super.key,
@@ -97,6 +103,7 @@ class VoiceClawApp extends StatelessWidget {
     required this.openClawService,
     required this.speechService,
     required this.ttsService,
+    required this.wakeWordService,
   });
 
   @override
@@ -109,6 +116,7 @@ class VoiceClawApp extends StatelessWidget {
             speechService: speechService,
             ttsService: ttsService,
             settingsService: settingsService,
+            wakeWordService: wakeWordService,
           )..add(Initialize()),
         ),
       ],
