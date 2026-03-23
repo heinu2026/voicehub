@@ -19,6 +19,7 @@ class SettingsService {
   static const String _keyWhisperUrl = 'whisper_url';
   static const String _keyWhisperApiKey = 'whisper_api_key';
   static const String _keyWhisperModel = 'whisper_model';
+  static const String _keyListeningWindowDuration = 'listening_window_duration';
 
   SharedPreferences? _prefs;
   final _uuid = const Uuid();
@@ -255,5 +256,15 @@ class SettingsService {
     final missing = <String>[];
     if (!isOpenClawConfigured) missing.add('OpenClaw 地址');
     return missing;
+  }
+
+  // ========== Listening Window 配置 ==========
+
+  /// Listening Window 持续时间（秒），默认 20 秒
+  int get listeningWindowDuration =>
+      _prefs?.getInt(_keyListeningWindowDuration) ?? 20;
+
+  Future<bool> setListeningWindowDuration(int seconds) async {
+    return await _prefs?.setInt(_keyListeningWindowDuration, seconds) ?? false;
   }
 }

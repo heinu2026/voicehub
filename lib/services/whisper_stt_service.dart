@@ -32,6 +32,15 @@ class WhisperSttService {
   bool _isListening = false;
   bool _isConnected = false;
 
+  /// 是否在主动监听中（断开后自动重连）
+  bool _shouldReconnect = false;
+
+  /// 重连定时器
+  Timer? _reconnectTimer;
+  static const int _reconnectDelaySeconds = 3;
+  static const int _maxReconnectAttempts = 5;
+  int _reconnectAttempts = 0;
+
   /// WebSocket 服务器地址（不含 path）
   String _wsUrl = '';
 
@@ -148,13 +157,17 @@ class WhisperSttService {
           debugPrint('WhisperSttService: WebSocket 错误 $e');
           _isConnected = false;
           _connectedController.add(false);
+          _scheduleReconnect();
         },
         onDone: () {
           debugPrint('WhisperSttService: WebSocket 连接关闭');
           _isConnected = false;
           _connectedController.add(false);
+          _scheduleReconnect();
         },
       );
+
+      _reconnectAttempts = 0; // 连接成功，重置重试计数
 
       return true;
     } catch (e) {
@@ -210,6 +223,9 @@ class WhisperSttService {
 
     if (_isListening) return;
 
+    // 允许自动重连
+    _shouldReconnect = true;
+
     // 先确保已连接
     if (!_isConnected) {
       final ok = await connect();
@@ -259,6 +275,8 @@ class WhisperSttService {
   /// 发送 stop 命令，通知服务器强制触发当前语音段转写
   Future<void> stop() async {
     if (!_isListening) return;
+    _shouldReconnect = false;
+    _reconnectTimer?.cancel();
 
     _pcmSubscription?.cancel();
     _pcmSubscription = null;
@@ -281,6 +299,8 @@ class WhisperSttService {
   /// 取消监听（不触发转写）
   Future<void> cancel() async {
     if (!_isListening) return;
+    _shouldReconnect = false;
+    _reconnectTimer?.cancel();
 
     _pcmSubscription?.cancel();
     _pcmSubscription = null;
@@ -311,6 +331,9 @@ class WhisperSttService {
 
   /// 断开 WebSocket 连接
   Future<void> disconnect() async {
+    _shouldReconnect = false;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     _wsSubscription?.cancel();
     _wsSubscription = null;
 
@@ -321,6 +344,47 @@ class WhisperSttService {
 
     _isConnected = false;
     _connectedController.add(false);
+  }
+
+  /// 调度自动重连
+  void _scheduleReconnect() {
+    if (!_shouldReconnect) return;
+    if (_reconnectAttempts >= _maxReconnectAttempts) {
+      debugPrint('WhisperSttService: 重连次数已达上限 ($_maxReconnectAttempts)，放弃');
+      _shouldReconnect = false;
+      return;
+    }
+    if (_wsUrl.isEmpty) return;
+
+    _reconnectAttempts++;
+    final delay = _reconnectDelaySeconds * _reconnectAttempts; // 递增延迟
+
+    debugPrint('WhisperSttService: $_reconnectDelaySeconds 秒后尝试重连 ($_reconnectAttempts/$_maxReconnectAttempts)...');
+
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(Duration(seconds: delay), () {
+      _attemptReconnect();
+    });
+  }
+
+  /// 执行重连
+  Future<void> _attemptReconnect() async {
+    if (!_shouldReconnect) return;
+
+    debugPrint('WhisperSttService: 正在重连...');
+    try {
+      final ok = await connect();
+      if (ok && _isListening) {
+        // 重连成功后重新开始监听
+        await startListening();
+        debugPrint('WhisperSttService: 重连成功！');
+      } else {
+        _scheduleReconnect();
+      }
+    } catch (e) {
+      debugPrint('WhisperSttService: 重连失败 $e');
+      _scheduleReconnect();
+    }
   }
 
   Future<void> dispose() async {

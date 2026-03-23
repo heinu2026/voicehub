@@ -82,3 +82,6 @@ class WakeWordDetected extends ChatEvent {}
 
 /// 切换唤醒词启用状态
 class ToggleWakeWord extends ChatEvent {}
+
+/// Listening Window 超时
+class ListeningWindowTimeout extends ChatEvent {}

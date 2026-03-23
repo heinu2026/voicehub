@@ -203,6 +203,10 @@ class ChatScreen extends StatelessWidget {
         statusText = '🔊 播放语音...';
         statusColor = AppTheme.primaryColor;
         break;
+      case ChatStatus.listeningWindow:
+        statusText = '💬 追问窗口（可直接说话）';
+        statusColor = AppTheme.successColor;
+        break;
       case ChatStatus.configRequired:
         statusText = '⚠️ 请先配置';
         statusColor = Colors.orange;

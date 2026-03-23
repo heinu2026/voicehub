@@ -2,12 +2,13 @@ import 'package:equatable/equatable.dart';
 import '../../models/message.dart';
 
 enum ChatStatus {
-  idle,           // 空闲
-  listening,      // 正在听语音
-  processing,     // 处理中（AI 思考）
-  speaking,       // 正在播放 TTS
-  configRequired, // 等待配置
-  error,          // 错误
+  idle,             // 空闲（回到唤醒词监听）
+  listening,        // 正在听语音（唤醒词触发后 or Listening Window）
+  processing,       // 处理中（AI 思考）
+  speaking,         // 正在播放 TTS
+  listeningWindow,   // Listening Window：AI 回复后，等待追问
+  configRequired,   // 等待配置
+  error,            // 错误
 }
 
 class ChatState extends Equatable {

@@ -38,6 +38,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   /// 确认音效播放器
   final AudioPlayer _dingPlayer = AudioPlayer();
 
+  /// Listening Window 定时器
+  Timer? _listeningWindowTimer;
+
   ChatBloc({
     required OpenClawService openClawService,
     required SpeechService speechService,
@@ -64,6 +67,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     on<StartListening>(_onStartListening);
     on<WakeWordDetected>(_onWakeWordDetected);
     on<ToggleWakeWord>(_onToggleWakeWord);
+    on<ListeningWindowTimeout>(_onListeningWindowTimeout);
   }
 
   /// 设置 WakeWordService（可在初始化后注入）
@@ -385,19 +389,30 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
   Future<void> _onConversationListeningResult(
       ConversationListeningResult event, Emitter<ChatState> emit) async {
+    // 取消 Listening Window 计时器，避免超时和结果同时处理
+    _cancelListeningWindowTimer();
+
     final text = event.recognizedText;
     debugPrint('ChatBloc: 收到识别结果 "$text"');
 
     if (_containsExitKeyword(text)) {
+      _cancelListeningWindowTimer();
+      await _ttsService.stop();
       try {
         await _ttsService.speak('好的，再见！');
       } catch (_) {}
+      emit(state.copyWith(status: ChatStatus.idle, partialText: ''));
+      await _resumeWakeWordListening();
       return;
     }
 
     if (text.trim().isEmpty) {
-      // 空结果，不重启，等待用户手动触发
-      await _resumeWakeWordListening();
+      // 空结果，重新进入 Listening Window
+      if (state.status == ChatStatus.listeningWindow) {
+        emit(state.copyWith(partialText: ''));
+      } else {
+        await _resumeWakeWordListening();
+      }
       return;
     }
 
@@ -436,9 +451,12 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         debugPrint('TTS 播放失败: $e');
       }
 
-      // 播完后恢复唤醒词监听
-      emit(state.copyWith(status: ChatStatus.idle));
-      await _resumeWakeWordListening();
+      // 播完后进入 Listening Window（追问窗口）
+      emit(state.copyWith(status: ChatStatus.listeningWindow, partialText: ''));
+      _startListeningWindowTimer();
+
+      // 自动开始监听下一轮（Listening Window 期间可以追问）
+      await _speechService.startListening();
 
     } catch (e) {
       emit(state.copyWith(
@@ -453,10 +471,42 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   void _onPartialListeningResult(
       PartialListeningResult event, Emitter<ChatState> emit) {
     debugPrint('ChatBloc: partial "$event.partialText"');
+
+    // 在 Listening Window 中，重置计时器（用户还在说话）
+    if (state.status == ChatStatus.listeningWindow) {
+      _startListeningWindowTimer();
+    }
+
     emit(state.copyWith(
       partialText: event.partialText,
       status: ChatStatus.listening,
     ));
+  }
+
+  /// Listening Window 超时：回到唤醒词监听
+  Future<void> _onListeningWindowTimeout(
+      ListeningWindowTimeout event, Emitter<ChatState> emit) async {
+    debugPrint('ChatBloc: Listening Window 超时，回到唤醒词监听');
+    await _speechService.stop();
+    emit(state.copyWith(status: ChatStatus.idle, partialText: ''));
+    await _resumeWakeWordListening();
+  }
+
+  /// 启动 Listening Window 定时器
+  void _startListeningWindowTimer() {
+    _cancelListeningWindowTimer();
+    final duration = _settingsService.listeningWindowDuration;
+    _listeningWindowTimer = Timer(
+      Duration(seconds: duration),
+      () => add(ListeningWindowTimeout()),
+    );
+    debugPrint('ChatBloc: Listening Window 计时器启动 (${duration}s)');
+  }
+
+  /// 取消 Listening Window 定时器
+  void _cancelListeningWindowTimer() {
+    _listeningWindowTimer?.cancel();
+    _listeningWindowTimer = null;
   }
 
   bool _containsExitKeyword(String text) {
@@ -471,6 +521,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     _speechStatusSubscription?.cancel();
     _speechDecibelSubscription?.cancel();
     _wakeWordStatusSubscription?.cancel();
+    _listeningWindowTimer?.cancel();
     _dingPlayer.dispose();
     _openClawService.dispose();
     _speechService.dispose();
