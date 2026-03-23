@@ -167,7 +167,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       });
 
       // 尝试加载默认模型
-      const modelPath = 'assets/models/hey_voiceclaw.pmdl';
+      const modelPath = 'assets/models/claw.pmdl';
       final modelReady = await _wakeWordService!.prepare(modelPath);
 
       if (modelReady) {
@@ -236,7 +236,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   Future<void> _playDingSound() async {
     try {
       // 优先用内置音效文件
-      await _dingPlayer.setSource(AssetSource('audio/ding.wav'));
+      await _dingPlayer.setSource(AssetSource('audio/ding.mp3'));
       await _dingPlayer.resume();
     } catch (e) {
       // 文件不存在时，用系统提示音（TTS 引擎未初始化前只能这样）
@@ -261,7 +261,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     if (newEnabled) {
       // 启用：先停止语音监听，再启动唤醒词
       await _speechService.stop();
-      final ok = await _wakeWordService!.prepare('assets/models/hey_voiceclaw.pmdl');
+      final ok = await _wakeWordService!.prepare('assets/models/claw.pmdl');
       if (ok) {
         await _wakeWordService!.startListening();
         emit(state.copyWith(
