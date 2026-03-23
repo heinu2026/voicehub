@@ -41,6 +41,11 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   /// Listening Window 定时器
   Timer? _listeningWindowTimer;
 
+  /// 取消当前 OpenClaw 流式请求
+  void cancelOpenClawStream() {
+    _openClawService.cancelStream();
+  }
+
   ChatBloc({
     required OpenClawService openClawService,
     required SpeechService speechService,
@@ -332,11 +337,14 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     ));
 
     try {
-      final reply = await _openClawService.sendMessage(event.text);
+      // 流式模式：边接收 AI 回复边播放 TTS
+      final textStream = _openClawService.sendMessageStream(event.text);
+      final fullReply = StringBuffer();
 
+      // 先发一条空 assistant 消息，后面逐步更新
       final assistantMessage = Message(
         id: _uuid.v4(),
-        content: reply,
+        content: '',
         role: MessageRole.assistant,
         timestamp: DateTime.now(),
       );
@@ -347,14 +355,44 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       ));
 
       try {
-        await _ttsService.speak(reply);
+        // 流式 TTS 播放
+        await for (final sentence in _ttsService.speakStream(textStream)) {
+          // 每播完一句，更新 assistant 消息
+          fullReply.write(sentence);
+          final updatedMessages = [...state.messages];
+          if (updatedMessages.isNotEmpty) {
+            updatedMessages[updatedMessages.length - 1] =
+                Message(
+                  id: assistantMessage.id,
+                  content: fullReply.toString(),
+                  role: MessageRole.assistant,
+                  timestamp: assistantMessage.timestamp,
+                );
+          }
+          emit(state.copyWith(messages: updatedMessages));
+        }
       } catch (e) {
         debugPrint('TTS 播放失败: $e');
+        // TTS 失败时，保存已收到的文本
+        if (fullReply.isNotEmpty) {
+          final updatedMessages = [...state.messages];
+          if (updatedMessages.isNotEmpty) {
+            updatedMessages[updatedMessages.length - 1] =
+                Message(
+                  id: assistantMessage.id,
+                  content: fullReply.toString(),
+                  role: MessageRole.assistant,
+                  timestamp: assistantMessage.timestamp,
+                );
+          }
+          emit(state.copyWith(messages: updatedMessages));
+        }
       }
 
-      // TTS 播完后，唤醒词模式恢复监听，否则进入空闲
-      emit(state.copyWith(status: ChatStatus.idle));
-      await _resumeWakeWordListening();
+      // TTS 播完后，进入追问窗口
+      emit(state.copyWith(status: ChatStatus.listeningWindow, partialText: ''));
+      _startListeningWindowTimer();
+      await _speechService.startListening();
 
     } catch (e) {
       emit(state.copyWith(
@@ -366,12 +404,14 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
   Future<void> _onStopListening(
       StopListening event, Emitter<ChatState> emit) async {
+    cancelOpenClawStream();
     await _speechService.stop();
-    emit(state.copyWith(status: ChatStatus.idle, voiceLevel: 0));
+    emit(state.copyWith(status: ChatStatus.idle, voiceLevel: 0, partialText: ''));
     await _resumeWakeWordListening();
   }
 
   Future<void> _onStopTts(StopTts event, Emitter<ChatState> emit) async {
+    cancelOpenClawStream();
     await _ttsService.stop();
     emit(state.copyWith(status: ChatStatus.idle));
   }
@@ -397,6 +437,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
     if (_containsExitKeyword(text)) {
       _cancelListeningWindowTimer();
+      cancelOpenClawStream(); // 取消 AI 流
       await _ttsService.stop();
       try {
         await _ttsService.speak('好的，再见！');
@@ -431,11 +472,13 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     ));
 
     try {
-      final reply = await _openClawService.sendMessage(text);
+      // 流式：边接收 AI 回复，边播放 TTS
+      final textStream = _openClawService.sendMessageStream(text);
+      final fullReply = StringBuffer();
 
       final assistantMessage = Message(
         id: _uuid.v4(),
-        content: reply,
+        content: '',
         role: MessageRole.assistant,
         timestamp: DateTime.now(),
       );
@@ -446,16 +489,41 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       ));
 
       try {
-        await _ttsService.speak(reply);
+        // 流式 TTS：每播完一句 yield 回来，更新 UI
+        await for (final sentence in _ttsService.speakStream(textStream)) {
+          fullReply.write(sentence);
+          final updatedMessages = [...state.messages];
+          if (updatedMessages.isNotEmpty) {
+            updatedMessages[updatedMessages.length - 1] =
+                Message(
+                  id: assistantMessage.id,
+                  content: fullReply.toString(),
+                  role: MessageRole.assistant,
+                  timestamp: assistantMessage.timestamp,
+                );
+          }
+          emit(state.copyWith(messages: updatedMessages));
+        }
       } catch (e) {
         debugPrint('TTS 播放失败: $e');
+        if (fullReply.isNotEmpty) {
+          final updatedMessages = [...state.messages];
+          if (updatedMessages.isNotEmpty) {
+            updatedMessages[updatedMessages.length - 1] =
+                Message(
+                  id: assistantMessage.id,
+                  content: fullReply.toString(),
+                  role: MessageRole.assistant,
+                  timestamp: assistantMessage.timestamp,
+                );
+          }
+          emit(state.copyWith(messages: updatedMessages));
+        }
       }
 
-      // 播完后进入 Listening Window（追问窗口）
+      // 播完后进入 Listening Window
       emit(state.copyWith(status: ChatStatus.listeningWindow, partialText: ''));
       _startListeningWindowTimer();
-
-      // 自动开始监听下一轮（Listening Window 期间可以追问）
       await _speechService.startListening();
 
     } catch (e) {
