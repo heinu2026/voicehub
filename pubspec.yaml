@@ -24,8 +24,6 @@ dependencies:
   flutter_tts: ^3.8.5
   audioplayers: ^5.2.1
 
-  # Wake Word (Snowboy)
-  flutter_snowboy: ^0.1.2
   audio_session: ^0.1.18
   path: ^1.9.0
   
@@ -36,6 +34,8 @@ dependencies:
   shared_preferences: ^2.2.2
   permission_handler: ^11.1.0
   path_provider: ^2.0.15
+  speech_to_text: ^7.3.0
+  flutter_snowboy: ^0.1.2
 
 dev_dependencies:
   flutter_test:

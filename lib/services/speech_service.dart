@@ -82,6 +82,13 @@ class SpeechService {
     _settingsService = settingsService;
   }
 
+  /// 刷新 Whisper WebSocket URL（设置更新后调用）
+  void refreshWhisperUrl() {
+    if (_settingsService != null && _whisperSttService != null) {
+      _whisperSttService!.setWhisperUrl(_settingsService!.whisperWsUrl);
+    }
+  }
+
   Future<bool> init() async {
     if (_isInitialized) return true;
     _recorder ??= FlutterSoundRecorder();
@@ -149,8 +156,8 @@ class SpeechService {
 
       // 监听 PCM → 发送给 WhisperSttService
       _pcmStreamController!.stream.listen((pcmData) {
-        // WhisperSttService 在流模式下内部处理 WebSocket 发送
-        // 这里 PCM 已经在 WhisperSttService.startListening() 里发了
+        // 将 PCM 数据传给 WhisperSttService，通过 WebSocket 发送
+        _whisperSttService?.feedAudioData(pcmData);
       });
 
       // 开始录音：16kHz, 16-bit, mono PCM

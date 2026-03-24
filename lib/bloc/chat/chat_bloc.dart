@@ -84,6 +84,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     await _speechService.init();
     await _ttsService.init();
 
+    // 重新同步 Whisper URL（设置页面可能已更新配置）
+    _speechService.refreshWhisperUrl();
+
     // 监听语音识别结果（final - 触发 AI）
     _speechResultSubscription?.cancel();
     _speechResultSubscription = _speechService.onResult.listen((text) {
@@ -219,6 +222,10 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     // 先确保之前的录音已停止
     await _speechService.stop();
 
+    // 4.5 刷新 Whisper URL（设置页面可能已更新配置）
+    _speechService.refreshWhisperUrl();
+    debugPrint('ChatBloc: 唤醒词后刷新 Whisper URL: ${_settingsService.whisperWsUrl}');
+
     // 5. 告知 UI：进入"唤醒后等待说话"状态
     emit(state.copyWith(status: ChatStatus.listening));
 
@@ -299,6 +306,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   void _onStartListening(StartListening event, Emitter<ChatState> emit) {
     debugPrint(
         'ChatBloc: StartListening 触发，当前状态=${state.status}，whisperUrl=${_settingsService.whisperUrl}');
+
+    // 重新同步 Whisper URL（设置页面可能已更新配置）
+    _speechService.refreshWhisperUrl();
 
     if (!_settingsService.isWhisperConfigured) {
       debugPrint('ChatBloc: Whisper 未配置');

@@ -8,7 +8,7 @@ plugins {
 android {
     namespace = "com.heinu2026.voiceclaw"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = "27.0.12077973"
+    ndkVersion = "27.0.11902837"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -16,7 +16,7 @@ android {
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
+        jvmTarget = "17"
     }
 
     defaultConfig {

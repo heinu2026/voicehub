@@ -2,17 +2,15 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_sound/flutter_sound.dart';
-import 'package:audio_session/audio_session.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 /// Whisper STT 服务（流式 WebSocket 版本）
 ///
 /// 工作流程:
 /// 1. connect() 建立 WebSocket 连接
-/// 2. startListening() 开始录音，实时发送 PCM chunks
+/// 2. feedAudioData() 接收 PCM 数据，实时发送
 /// 3. onResult 收到 partial 和 final 识别结果
-/// 4. stop() 断开连接
+/// 4. disconnect() 断开连接
 ///
 /// 服务器要求:
 /// - ws://<host>:<port>/stream
@@ -22,11 +20,9 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 ///   → {"type": "done"}
 class WhisperSttService {
   WebSocketChannel? _wsChannel;
-  FlutterSoundRecorder? _recorder;
-  AudioSession? _audioSession;
 
-  StreamSubscription<Uint8List>? _pcmSubscription;
   StreamSubscription? _wsSubscription;
+  StreamSubscription? _pcmSubscription;
 
   bool _isInitialized = false;
   bool _isListening = false;
@@ -71,29 +67,6 @@ class WhisperSttService {
   /// 初始化
   Future<bool> init() async {
     if (_isInitialized) return true;
-
-    _recorder ??= FlutterSoundRecorder();
-
-    // 配置音频会话
-    _audioSession ??= await AudioSession.instance;
-    await _audioSession!.configure(AudioSessionConfiguration(
-      avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
-      avAudioSessionCategoryOptions:
-          AVAudioSessionCategoryOptions.defaultToSpeaker |
-              AVAudioSessionCategoryOptions.allowBluetooth,
-      avAudioSessionMode: AVAudioSessionMode.defaultMode,
-      avAudioSessionRouteSharingPolicy:
-          AVAudioSessionRouteSharingPolicy.defaultPolicy,
-      avAudioSessionSetActiveOptions: AVAudioSessionSetActiveOptions.none,
-      androidAudioAttributes: AndroidAudioAttributes(
-        contentType: AndroidAudioContentType.speech,
-        flags: AndroidAudioFlags.none,
-        usage: AndroidAudioUsage.voiceCommunication,
-      ),
-      androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
-      androidWillPauseWhenDucked: true,
-    ));
-
     _isInitialized = true;
     debugPrint('WhisperSttService: 初始化成功');
     return true;
@@ -137,8 +110,10 @@ class WhisperSttService {
     }
 
     try {
-      final uri = Uri.parse('$_wsUrl/stream');
-      debugPrint('WhisperSttService: 连接 $uri...');
+      final fullUrl = '$_wsUrl/stream';
+      final uri = Uri.parse(fullUrl);
+      debugPrint('WhisperSttService: 连接 WebSocket $fullUrl...');
+      debugPrint('  scheme=${uri.scheme}, host=${uri.host}, port=${uri.port}');
 
       _wsChannel = WebSocketChannel.connect(uri);
 
@@ -169,13 +144,43 @@ class WhisperSttService {
 
       _reconnectAttempts = 0; // 连接成功，重置重试计数
 
+      // 启动 PCM 发送循环
+      _startPcmSendingLoop();
+
       return true;
-    } catch (e) {
-      debugPrint('WhisperSttService: WebSocket 连接失败 $e');
+    } catch (e, st) {
+      debugPrint('WhisperSttService: WebSocket 连接失败: $e');
+      debugPrint('  stack: $st');
       _isConnected = false;
       _connectedController.add(false);
       return false;
     }
+  }
+
+  /// PCM 数据缓冲区（异步发送）
+  final _pcmBuffer = StreamController<Uint8List>();
+
+  /// 异步 PCM 发送任务
+  void _startPcmSendingLoop() {
+    _pcmSubscription?.cancel();
+    _pcmSubscription = _pcmBuffer.stream.listen((pcmData) {
+      if (_isConnected && _wsChannel != null) {
+        try {
+          _wsChannel!.sink.add(pcmData);
+        } catch (e) {
+          debugPrint('WhisperSttService: 发送 PCM 失败 $e');
+        }
+      }
+    });
+  }
+
+  /// 接收 PCM 数据（由 SpeechService 调用）
+  void feedAudioData(Uint8List pcmData) {
+    if (!_isConnected) {
+      debugPrint('WhisperSttService: WebSocket 未连接，丢弃 PCM 数据');
+      return;
+    }
+    _pcmBuffer.add(pcmData);
   }
 
   /// 处理 WebSocket 消息
@@ -213,8 +218,8 @@ class WhisperSttService {
     }
   }
 
-  /// 开始流式录音
-  /// 录音同时通过 WebSocket 实时发送 PCM 数据
+  /// 开始流式录音（由 SpeechService 调用）
+  /// 录音逻辑在 SpeechService，这里只设置状态
   Future<void> startListening() async {
     if (!_isInitialized) {
       final ok = await init();
@@ -232,43 +237,9 @@ class WhisperSttService {
       if (!ok) throw Exception('WebSocket 连接失败');
     }
 
-    try {
-      await _audioSession!.setActive(true);
-      await _recorder!.openRecorder();
-
-      // 创建 PCM 流控制器
-      final pcmController = StreamController<Uint8List>();
-
-      // 监听 PCM 数据，实时发送
-      _pcmSubscription?.cancel();
-      _pcmSubscription = pcmController.stream.listen((pcmData) {
-        if (_isConnected && _wsChannel != null) {
-          try {
-            _wsChannel!.sink.add(pcmData);
-          } catch (e) {
-            debugPrint('WhisperSttService: 发送 PCM 失败 $e');
-          }
-        }
-      });
-
-      // 开始录音：16kHz, 16-bit, mono PCM
-      await _recorder!.startRecorder(
-        toStream: pcmController.sink,
-        codec: Codec.pcm16,
-        sampleRate: 16000,
-        numChannels: 1,
-      );
-
-      _isListening = true;
-      _statusController.add(true);
-      debugPrint('WhisperSttService: 开始录音并流式发送...');
-
-    } catch (e) {
-      debugPrint('WhisperSttService: 启动监听失败 $e');
-      _isListening = false;
-      _statusController.add(false);
-      await _cleanupRecorder();
-    }
+    _isListening = true;
+    _statusController.add(true);
+    debugPrint('WhisperSttService: 开始接收音频数据...');
   }
 
   /// 停止监听
@@ -277,11 +248,6 @@ class WhisperSttService {
     if (!_isListening) return;
     _shouldReconnect = false;
     _reconnectTimer?.cancel();
-
-    _pcmSubscription?.cancel();
-    _pcmSubscription = null;
-
-    await _recorder?.stopRecorder();
 
     // 发送 stop 命令
     if (_isConnected && _wsChannel != null) {
@@ -293,7 +259,6 @@ class WhisperSttService {
     _isListening = false;
     _statusController.add(false);
     debugPrint('WhisperSttService: 停止监听');
-    await _cleanupRecorder();
   }
 
   /// 取消监听（不触发转写）
@@ -302,13 +267,6 @@ class WhisperSttService {
     _shouldReconnect = false;
     _reconnectTimer?.cancel();
 
-    _pcmSubscription?.cancel();
-    _pcmSubscription = null;
-
-    await _recorder?.stopRecorder();
-    _isListening = false;
-    _statusController.add(false);
-
     // 发送 cancel（服务器可忽略）
     if (_isConnected && _wsChannel != null) {
       try {
@@ -316,17 +274,9 @@ class WhisperSttService {
       } catch (_) {}
     }
 
+    _isListening = false;
+    _statusController.add(false);
     debugPrint('WhisperSttService: 取消监听');
-    await _cleanupRecorder();
-  }
-
-  Future<void> _cleanupRecorder() async {
-    try {
-      await _recorder?.closeRecorder();
-    } catch (_) {}
-    try {
-      await _audioSession?.setActive(false);
-    } catch (_) {}
   }
 
   /// 断开 WebSocket 连接
@@ -334,6 +284,8 @@ class WhisperSttService {
     _shouldReconnect = false;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+    _pcmSubscription?.cancel();
+    _pcmSubscription = null;
     _wsSubscription?.cancel();
     _wsSubscription = null;
 
@@ -390,6 +342,8 @@ class WhisperSttService {
   Future<void> dispose() async {
     await cancel();
     await disconnect();
+    _pcmSubscription?.cancel();
+    _pcmBuffer.close();
     _partialController.close();
     _resultController.close();
     _statusController.close();

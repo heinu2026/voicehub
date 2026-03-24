@@ -60,8 +60,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _showValidationError('请填写 Whisper 服务器地址');
       return;
     }
-    if (!whisperUrl.startsWith('http')) {
-      _showValidationError('Whisper 地址必须以 http:// 或 https:// 开头');
+    if (!whisperUrl.startsWith('http') && !whisperUrl.startsWith('ws')) {
+      _showValidationError('Whisper 地址必须以 http://, https://, ws:// 或 wss:// 开头');
       return;
     }
     if (baseUrl.isEmpty) {

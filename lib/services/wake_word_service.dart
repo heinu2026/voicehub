@@ -2,144 +2,137 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_snowboy/flutter_snowboy.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:audio_session/audio_session.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as p;
-import 'package:flutter_snowboy/flutter_snowboy.dart';
 
-/// Snowboy 唤醒词检测服务
+/// 唤醒词检测服务
+///
+/// 使用 Snowboy 进行本地唤醒词检测，支持离线和低延迟
 ///
 /// 工作流程:
-/// 1. init() + prepare() 初始化并加载 .pmdl 模型
-/// 2. startListening() 开始持续监听麦克风
-/// 3. 检测到唤醒词 → _onWakeWordDetected 回调触发
-/// 4. stopListening() 停止监听
+/// 1. init() 初始化 Snowboy 检测器
+/// 2. prepare(modelAssetPath) 加载唤醒词模型
+/// 3. startListening() 开始持续监听
+/// 4. 检测到唤醒词后，调用 onWakeWordDetected 回调
 ///
-/// 音频格式: 16kHz, 16-bit, mono PCM
+/// 注意: 需要麦克风权限
 class WakeWordService {
   Snowboy? _detector;
-  FlutterSoundRecorder? _recorder;
-
-  /// PCM 原始数据流控制器
-  StreamController<Uint8List>? _pcmStreamController;
-  StreamSubscription<Uint8List>? _pcmSubscription;
-
-  AudioSession? _audioSession;
-
   bool _isInitialized = false;
   bool _isListening = false;
 
-  /// 模型绝对路径
-  String? _modelPath;
+  FlutterSoundRecorder? _recorder;
+  AudioSession? _audioSession;
+  StreamSubscription? _recorderSubscription;
+  StreamController<Uint8List>? _pcmStreamController;
 
   /// 唤醒词检测回调
   VoidCallback? _onWakeWordDetected;
 
   final _statusController = StreamController<bool>.broadcast();
-  Stream<bool> get onStatus => _statusController.stream;
 
   bool get isInitialized => _isInitialized;
   bool get isListening => _isListening;
+  Stream<bool> get onStatus => _statusController.stream;
 
   /// 设置唤醒词检测回调
   void setOnWakeWordDetected(VoidCallback callback) {
     _onWakeWordDetected = callback;
   }
 
-  /// 初始化
+  /// 初始化 Snowboy 检测器
   Future<void> init() async {
     if (_isInitialized) return;
 
-    _detector ??= Snowboy();
-    _recorder ??= FlutterSoundRecorder();
-
-    // 配置音频会话（iOS/Android 独占麦克风）
-    _audioSession ??= await AudioSession.instance;
-    await _audioSession!.configure(AudioSessionConfiguration(
-      avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
-      avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.defaultToSpeaker |
-          AVAudioSessionCategoryOptions.allowBluetooth,
-      avAudioSessionMode: AVAudioSessionMode.defaultMode,
-      avAudioSessionRouteSharingPolicy:
-          AVAudioSessionRouteSharingPolicy.defaultPolicy,
-      avAudioSessionSetActiveOptions: AVAudioSessionSetActiveOptions.none,
-      androidAudioAttributes: const AndroidAudioAttributes(
-        contentType: AndroidAudioContentType.speech,
-        flags: AndroidAudioFlags.none,
-        usage: AndroidAudioUsage.voiceCommunication,
-      ),
-      androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
-      androidWillPauseWhenDucked: true,
-    ));
-
-    _isInitialized = true;
-    debugPrint('WakeWordService: 初始化完成');
+    try {
+      _detector = Snowboy();
+      _isInitialized = true;
+      debugPrint('WakeWordService: Snowboy 初始化成功');
+    } catch (e) {
+      debugPrint('WakeWordService: 初始化失败 $e');
+    }
   }
 
-  /// 准备模型文件
-  /// [modelAssetPath] - assets 中的模型路径，如 'assets/models/hey_voiceclaw.pmdl'
+  /// 准备模型（从 assets 加载到临时目录）
   Future<bool> prepare(String modelAssetPath) async {
     if (!_isInitialized) await init();
+    if (!_isInitialized || _detector == null) return false;
 
     try {
-      final modelFile = await _copyAssetToTempFile(modelAssetPath);
-      _modelPath = modelFile.path;
+      // 从 assets 复制模型文件到临时目录（Snowboy 需要文件路径）
+      final byteData = await rootBundle.load(modelAssetPath);
+      final tempDir = Directory.systemTemp;
+      final fileName = modelAssetPath.split('/').last;
+      final tempFile = File('${tempDir.path}/$fileName');
+      await tempFile.writeAsBytes(byteData.buffer.asUint8List());
 
-      debugPrint('WakeWordService: 加载模型 $_modelPath');
+      // 设置唤醒词回调
+      _detector!.hotwordHandler = () {
+        debugPrint('WakeWordService: ✅ 检测到唤醒词！');
+        _onWakeWordDetected?.call();
+      };
 
-      final success = await _detector!.prepare(
-        _modelPath!,
-        sensitivity: 0.5,
-        audioGain: 1.0,
-        applyFrontend: true,
-      );
-
-      if (!success) {
+      // 初始化检测器
+      final result = await _detector!.prepare(tempFile.path);
+      if (!result) {
         debugPrint('WakeWordService: 模型加载失败');
         return false;
       }
 
-      _detector!.hotwordHandler = _onWakeWordDetected;
-      debugPrint('WakeWordService: 模型准备完成');
+      debugPrint('WakeWordService: 模型加载成功: $modelAssetPath');
       return true;
-
     } catch (e) {
-      debugPrint('WakeWordService: prepare 失败 $e');
+      debugPrint('WakeWordService: 模型加载失败 $e');
       return false;
     }
   }
 
-  /// 开始持续监听
-  /// 使用 FlutterSound 流式接口，将 PCM 数据实时送入 Snowboy 检测
+  /// 开始持续监听唤醒词
   Future<void> startListening() async {
-    if (!_isInitialized || _detector == null) {
-      debugPrint('WakeWordService: 未初始化，请先调用 prepare()');
-      return;
+    if (!_isInitialized) {
+      await init();
+      if (!_isInitialized) return;
     }
 
     if (_isListening) return;
 
-    if (_modelPath == null) {
-      debugPrint('WakeWordService: 未加载模型');
-      return;
-    }
+    // 初始化录音器
+    _recorder ??= FlutterSoundRecorder();
 
     try {
+      // 配置音频会话
+      _audioSession ??= await AudioSession.instance;
+      await _audioSession!.configure(AudioSessionConfiguration(
+        avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
+        avAudioSessionCategoryOptions:
+            AVAudioSessionCategoryOptions.defaultToSpeaker |
+                AVAudioSessionCategoryOptions.allowBluetooth,
+        avAudioSessionMode: AVAudioSessionMode.defaultMode,
+        avAudioSessionRouteSharingPolicy:
+            AVAudioSessionRouteSharingPolicy.defaultPolicy,
+        avAudioSessionSetActiveOptions: AVAudioSessionSetActiveOptions.none,
+        androidAudioAttributes: AndroidAudioAttributes(
+          contentType: AndroidAudioContentType.speech,
+          flags: AndroidAudioFlags.none,
+          usage: AndroidAudioUsage.voiceCommunication,
+        ),
+        androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
+        androidWillPauseWhenDucked: true,
+      ));
+
       await _audioSession!.setActive(true);
       await _recorder!.openRecorder();
 
-      // PCM Uint8List 流控制器
+      // PCM 流控制器
       _pcmStreamController = StreamController<Uint8List>();
 
-      // 监听 PCM 数据 → 送入 Snowboy
-      _pcmSubscription?.cancel();
-      _pcmSubscription = _pcmStreamController!.stream.listen((pcmData) {
-        _detector!.detect(pcmData);
+      // 监听 PCM 数据并进行唤醒词检测
+      _recorderSubscription = _pcmStreamController!.stream.listen((pcmData) {
+        _detectHotword(pcmData);
       });
 
-      // 开始录音：16kHz, 16-bit, mono PCM
-      // 新版 flutter_sound 直接输出 Uint8List
+      // 开始录音：16kHz, 16-bit, mono PCM（Snowboy 要求）
       await _recorder!.startRecorder(
         toStream: _pcmStreamController!.sink,
         codec: Codec.pcm16,
@@ -149,67 +142,58 @@ class WakeWordService {
 
       _isListening = true;
       _statusController.add(true);
-      debugPrint('WakeWordService: 开始持续监听...');
-
+      debugPrint('WakeWordService: 开始监听唤醒词');
     } catch (e) {
-      debugPrint('WakeWordService: 启动监听失败 $e');
-      _isListening = false;
-      _statusController.add(false);
-      await _cleanup();
+      debugPrint('WakeWordService: 启动录音失败 $e');
+      await _cleanupRecorder();
     }
+  }
+
+  /// 使用 Snowboy 检测唤醒词
+  void _detectHotword(Uint8List pcmData) {
+    if (_detector == null || !_isListening) return;
+
+    // detect 是异步的，但我们不在这里 await，以保持实时处理
+    _detector!.detect(pcmData).catchError((e) {
+      debugPrint('WakeWordService: 检测失败 $e');
+    });
   }
 
   /// 停止监听
   Future<void> stopListening() async {
     if (!_isListening) return;
 
-    try {
-      await _recorder?.stopRecorder();
-    } catch (e) {
-      debugPrint('WakeWordService: 停止录音器失败 $e');
-    }
-
-    await _cleanup();
-
     _isListening = false;
+    await _cleanupRecorder();
     _statusController.add(false);
     debugPrint('WakeWordService: 停止监听');
   }
 
-  Future<void> _cleanup() async {
-    await _pcmSubscription?.cancel();
-    _pcmSubscription = null;
+  Future<void> _cleanupRecorder() async {
+    _recorderSubscription?.cancel();
+    _recorderSubscription = null;
 
-    await _pcmStreamController?.close();
-    _pcmStreamController = null;
-
+    try {
+      await _recorder?.stopRecorder();
+    } catch (_) {}
     try {
       await _recorder?.closeRecorder();
     } catch (_) {}
-
     try {
       await _audioSession?.setActive(false);
     } catch (_) {}
+
+    _pcmStreamController?.close();
+    _pcmStreamController = null;
   }
 
   /// 释放资源
   Future<void> dispose() async {
     await stopListening();
-    _statusController.close();
+    await _statusController.close();
     await _detector?.purge();
+    _detector = null;
+    _isInitialized = false;
     debugPrint('WakeWordService: 已释放');
-  }
-
-  /// 将 assets 中的文件复制到临时目录
-  Future<File> _copyAssetToTempFile(String assetPath) async {
-    final byteData = await rootBundle.load(assetPath);
-    final tempDir = await getTemporaryDirectory();
-    final fileName = p.basename(assetPath);
-    final outFile = File(p.join(tempDir.path, fileName));
-    await outFile.writeAsBytes(
-      byteData.buffer.asUint8List(byteData.offsetInBytes, byteData.lengthInBytes),
-    );
-    debugPrint('WakeWordService: 模型已复制到 ${outFile.path}');
-    return outFile;
   }
 }

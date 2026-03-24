@@ -112,9 +112,9 @@ class ChatScreen extends StatelessWidget {
                 onPressed: () async {
                   // 跳转到设置页
                   await Navigator.pushNamed(context, '/settings');
-                  // 返回后直接开始聆听
+                  // 返回后重新触发 Initialize 事件，重新检查配置状态
                   if (context.mounted) {
-                    context.read<ChatBloc>().add(StartListening());
+                    context.read<ChatBloc>().add(Initialize());
                   }
                 },
                 icon: const Icon(Icons.settings),

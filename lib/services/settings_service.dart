@@ -37,13 +37,19 @@ class SettingsService {
   /// 获取配置文件的路径（Downloads 目录，重装后保留）
   Future<String> get configFilePath async {
     if (_configFilePath != null) return _configFilePath!;
-    // 使用 Downloads 目录，重装后不会被删除
-    final dir = await getExternalStorageDirectory();
-    if (dir != null) {
-      // 去掉 Android 的 /Android/data/... 路径，指向真实的 Downloads
-      _configFilePath = '/storage/emulated/0/Download/voiceclaw_config.json';
-    } else {
-      // fallback 到应用文档目录
+    try {
+      // 使用 Downloads 目录，重装后不会被删除
+      final dir = await getExternalStorageDirectory();
+      if (dir != null) {
+        // 使用实际目录路径，不要硬编码
+        _configFilePath = '${dir.path}/voiceclaw_config.json';
+      } else {
+        // fallback 到应用文档目录
+        final fallback = await getApplicationDocumentsDirectory();
+        _configFilePath = '${fallback.path}/voiceclaw_config.json';
+      }
+    } catch (e) {
+      // 最后 fallback 到应用文档目录
       final fallback = await getApplicationDocumentsDirectory();
       _configFilePath = '${fallback.path}/voiceclaw_config.json';
     }
@@ -228,7 +234,9 @@ class SettingsService {
   String get whisperWsUrl {
     final url = whisperUrl;
     if (url.isEmpty) return '';
-    // 自动转换 http:// → ws://
+    // 如果已经是 ws:// 或 wss://，直接返回
+    if (url.startsWith('ws://') || url.startsWith('wss://')) return url;
+    // 自动转换 http:// → ws://, https:// → wss://
     return url.replaceFirst('http://', 'ws://').replaceFirst('https://', 'wss://');
   }
 
